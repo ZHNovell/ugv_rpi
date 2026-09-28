@@ -265,7 +265,7 @@ class BaseController:
 
 if __name__ == '__main__':
 	# RPi5
-	base = BaseController('/dev/ttyAMA0', 115200)
+	base = BaseController('/dev/ttyS7', 115200)
 
 	# RPi4B
 	# base = BaseController('/dev/serial0', 115200)

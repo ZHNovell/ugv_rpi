@@ -1,6 +1,12 @@
 import cv2
 import imutils
-import mediapipe as mp
+try:
+    import mediapipe as mp
+    MEDIAPIPE_AVAILABLE = True
+except ImportError:
+    MEDIAPIPE_AVAILABLE = False
+    print("mediapipe not available — face/hand/pose detection disabled")
+    mp = None
 import imageio
 import threading
 import datetime, time
@@ -10,13 +16,23 @@ import yaml, os, json, subprocess
 from collections import deque
 import textwrap
 
-# libraries for csi camera
-from picamera2 import Picamera2
-from picamera2.encoders import H264Encoder, Encoder
-from picamera2.outputs import FfmpegOutput
+# libraries for csi camera (Raspberry Pi only — disabled on Orange Pi)
+try:
+    from picamera2 import Picamera2
+    from picamera2.encoders import H264Encoder, Encoder
+    from picamera2.outputs import FfmpegOutput
+    CSI_CAMERA_AVAILABLE = True
+except ImportError:
+    CSI_CAMERA_AVAILABLE = False
+    print("picamera2 not available — CSI camera disabled")
 
-# libraries for oak camera
-import depthai as dai
+# libraries for oak camera (disabled on Orange Pi)
+try:
+    import depthai as dai
+    OAK_CAMERA_AVAILABLE = True
+except ImportError:
+    OAK_CAMERA_AVAILABLE = False
+    print("depthai not available — OAK camera disabled")
 
 # config file.
 curpath = os.path.realpath(__file__)
@@ -87,19 +103,33 @@ class OpencvFuncs():
             self.color_upper = np.array(f['cv']['color_upper'])
         self.track_color_iterate = f['cv']['track_color_iterate']
 
-        # cv_dnn_objects
-        self.net = cv2.dnn.readNetFromCaffe(thisPath + '/models/deploy.prototxt', thisPath + '/models/mobilenet_iter_73000.caffemodel')
-        self.class_names = ["background", "aeroplane", "bicycle", "bird", "boat",
-                            "bottle", "bus", "car", "cat", "chair", "cow", "diningtable",
-                            "dog", "horse", "motorbike", "person", "pottedplant", "sheep",
-                            "sofa", "train", "tvmonitor"]
+        # NPU YOLOv5s (через Python-обёртку)
+        import yolov5_npu
+        self.yolov5_npu = yolov5_npu
+        self.npu_temp_path = "/tmp/yolo_input.jpg"
 
-        # mediapipe
-        self.mpDraw = mp.solutions.drawing_utils
+        # mediapipe (only if available)
+        if MEDIAPIPE_AVAILABLE:
+            self.mpDraw = mp.solutions.drawing_utils
+            self.mpHands = mp.solutions.hands
+            self.hands = self.mpHands.Hands(max_num_hands=1)
+            self.mp_face_detection = mp.solutions.face_detection
+            self.face_detection = self.mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
+            self.mp_pose = mp.solutions.pose
+            self.pose = self.mp_pose.Pose(static_image_mode=False,
+                                        model_complexity=1,
+                                        smooth_landmarks=True,
+                                        min_detection_confidence=0.5,
+                                        min_tracking_confidence=0.5)
+        else:
+            self.mpDraw = None
+            self.mpHands = None
+            self.hands = None
+            self.mp_face_detection = None
+            self.face_detection = None
+            self.mp_pose = None
+            self.pose = None
 
-        # mediapipe detect hand
-        self.mpHands = mp.solutions.hands
-        self.hands = self.mpHands.Hands(max_num_hands=1)
         self.max_distance = 1
         self.gs_pic_interval = 6
         self.gs_pic_last_time = time.time()
@@ -114,18 +144,6 @@ class OpencvFuncs():
         self.slope_on_speed = 0.1
         self.line_lower = np.array([25, 150, 70])
         self.line_upper = np.array([42, 255, 255])
-
-        # mediapipe detect faces
-        self.mp_face_detection = mp.solutions.face_detection
-        self.face_detection = self.mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
-
-        # mediapipe detect pose
-        self.mp_pose = mp.solutions.pose
-        self.pose = self.mp_pose.Pose(static_image_mode=False, 
-                                    model_complexity=1, 
-                                    smooth_landmarks=True, 
-                                    min_detection_confidence=0.5, 
-                                    min_tracking_confidence=0.5)
 
         # base data
         self.show_base_info_flag = False
@@ -157,8 +175,8 @@ class OpencvFuncs():
             self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, f['video']['default_res_w'])
             self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, f['video']['default_res_h'])
 
-        # csi camera init
-        if not self.usb_camera_connected:
+        # csi camera init (only if picamera2 is available)
+        if not self.usb_camera_connected and CSI_CAMERA_AVAILABLE:
             print("init csi camera.")
             try:
                 self.encoder = H264Encoder(1000000)
@@ -170,7 +188,7 @@ class OpencvFuncs():
                 self.csi_camera_connected = False
 
         #oak camera init 
-        if not self.usb_camera_connected and not self.csi_camera_connected:
+        if not self.usb_camera_connected and not self.csi_camera_connected and OAK_CAMERA_AVAILABLE:
             try:
                 self.pipeline = dai.Pipeline()
 
@@ -524,27 +542,26 @@ class OpencvFuncs():
 
     def cv_detect_objects(self, img):
         overlay_buffer = np.zeros_like(img)
-        cv2.putText(overlay_buffer, 'CV_OBJS', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        cv2.putText(overlay_buffer, 'NPU YOLOv5s', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        # Сохраняем кадр во временный файл
+        cv2.imwrite(self.npu_temp_path, img)
 
-        (h, w) = img.shape[:2]
-        blob = cv2.dnn.blobFromImage(cv2.resize(img, (300, 300)), 0.007843, (300, 300), 127.5)
-        self.net.setInput(blob)
-        detections = self.net.forward()
+        # Запускаем NPU-инференс
+        try:
+            detections = self.yolov5_npu.detect(self.npu_temp_path)
+        except Exception as e:
+            print(f"[cv_detect_objects] NPU error: {e}")
+            self.overlay = overlay_buffer
+            return
 
-        for i in range(0, detections.shape[2]):
-            confidence = detections[0, 0, i, 2]
-
-            if confidence > 0.2:
-                idx = int(detections[0, 0, i, 1])
-                box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
-                (startX, startY, endX, endY) = box.astype("int")
-
-                label = "{}: {:.2f}%".format(self.class_names[idx], confidence * 100)
-                cv2.rectangle(overlay_buffer, (startX, startY), (endX, endY), (0, 255, 0), 2)
-                y = startY - 15 if startY - 15 > 15 else startY + 15
-                cv2.putText(overlay_buffer, label, (startX, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        # Рисуем bounding boxes
+        for det in detections:
+            x0, y0, x1, y1 = det['bbox']
+            label = f"{det['class']}: {det['confidence']*100:.0f}%"
+            cv2.rectangle(overlay_buffer, (x0, y0), (x1, y1), (0, 255, 0), 2)
+            y = y0 - 10 if y0 - 10 > 10 else y0 + 20
+            cv2.putText(overlay_buffer, label, (x0, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
         self.overlay = overlay_buffer
 
@@ -655,6 +672,8 @@ class OpencvFuncs():
         return (value - original_min) / (original_max - original_min) * (new_max - new_min) + new_min
 
     def mp_detect_hand(self, img):
+        if not MEDIAPIPE_AVAILABLE:
+            return img, 0
         height, width = img.shape[:2]
         center_x, center_y = width // 2, height // 2
 
@@ -857,6 +876,8 @@ class OpencvFuncs():
         self.overlay = overlay_buffer
 
     def mediaPipe_faces(self, img):
+        if not MEDIAPIPE_AVAILABLE:
+            return
         image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         results = self.face_detection.process(image)
 
@@ -868,6 +889,8 @@ class OpencvFuncs():
         self.overlay = overlay_buffer
 
     def mediaPipe_pose(self, img):
+        if not MEDIAPIPE_AVAILABLE:
+            return
         image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         results = self.pose.process(image)
 

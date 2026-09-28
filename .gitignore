@@ -1,7 +1,21 @@
-ugv-env/
+# Бэкапы
+*.bak
+*.bak2
+*.bak3
+*.bak4
+*.bak5
+*.bak6
+*.bak7
+*.orig
+
+# Python
 __pycache__/
-tutorial_cn/__pycache__/
-tutorial_en/.ipynb_checkpoints/
-tutorial_cn/.ipynb_checkpoints/
-templates/pictures/photo*
-templates/videos/video*
+*.pyc
+ugv-env/
+
+# Временные файлы
+/tmp/
+*.log
+
+# Результаты тестов
+output_yolov5.png

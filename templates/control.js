@@ -616,6 +616,17 @@ socket.on('update', function(data) {
         var FButtons = advFBtn.getElementsByTagName("button");
         removeButtonsClass(FButtons);
 
+        // Обработчики для Advance CV Funcs
+        FButtons[0].addEventListener('click', function() {
+            sendCommand('base -c {"T":' + cv_objs + '}');
+        });
+        FButtons[1].addEventListener('click', function() {
+            sendCommand('base -c {"T":' + cv_clor + '}');
+        });
+        FButtons[2].addEventListener('click', function() {
+            sendCommand('base -c {"T":' + mp_hand + '}');
+        });
+
         var mpBtn = document.getElementById("mp_funcs_btn");
         var MPButtons = mpBtn.getElementsByTagName("button");
         removeButtonsClass(MPButtons);
@@ -625,6 +636,17 @@ socket.on('update', function(data) {
         var DTbuttons = dTypeBtn.getElementsByTagName("button");
         removeAllIcoClass(dtIco);
         removeButtonsClass(DTbuttons);
+
+        // Обработчики для Simple Detection
+        DTbuttons[0].addEventListener('click', function() {
+            sendCommand('base -c {"T":' + cv_none + '}');
+        });
+        DTbuttons[1].addEventListener('click', function() {
+            sendCommand('base -c {"T":' + cv_moti + '}');
+        });
+        DTbuttons[2].addEventListener('click', function() {
+            sendCommand('base -c {"T":' + cv_face + '}');
+        });
         if (data[detect_type] == cv_none) {
             dtIco.classList.add("feed_ico", "feed_ico_none");
             DTbuttons[0].classList.add("ctl_btn_active");
@@ -741,6 +763,36 @@ function cmdSend(inputA, inputB, inputC){
         lastArgsCmdSend = inputA;
         lastTimeCmdSend = now;
     }
+}
+
+
+function sendCmdObjs() {
+    sendCommand('base -c {"T":' + cv_objs + '}');
+}
+
+function sendCmdClor() {
+    sendCommand('base -c {"T":' + cv_clor + '}');
+}
+
+function sendCmdHand() {
+    sendCommand('base -c {"T":' + mp_hand + '}');
+}
+
+function sendCommand(command) {
+    fetch('/send_command', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'command=' + encodeURIComponent(command)
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('Command sent:', command, data);
+    })
+    .catch(error => {
+        console.error('Error:', error);
+    });
 }
 
 function cmdJsonCmd(jsonData){

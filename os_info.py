@@ -19,7 +19,7 @@ class SystemInfo(threading.Thread):
 
         self.net_interface = "wlan0"
         self.wlan_ip = None
-        self.eth0_ip = None
+        self.end0_ip = None
         self.wifi_mode = None
 
         self.update_interval = 2
@@ -48,7 +48,9 @@ class SystemInfo(threading.Thread):
 
     def get_cpu_temperature(self):
         try:
-            temperature_str = os.popen('vcgencmd measure_temp').readline()
+            # Orange Pi: читаем температуру из sysfs
+            with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+                temperature_str = f.read()
             temperature = float(temperature_str.replace("temp=", "").replace("'C\n", ""))
             return temperature
         except Exception as e:
@@ -70,7 +72,9 @@ class SystemInfo(threading.Thread):
 
     def get_wifi_mode(self):
         try:
-            result = subprocess.check_output(['/sbin/iwconfig', 'wlan0'], encoding='utf-8')
+            result = subprocess.check_output(['/usr/sbin/iw', 'dev', 'wlan0', 'info'],
+                                             encoding='utf-8',
+                                             stderr=subprocess.DEVNULL)
             if "Mode:Master" in result or "Mode:AP" in result:
                 return "AP"
             if "Mode:Managed" in result:
@@ -82,16 +86,18 @@ class SystemInfo(threading.Thread):
 
     def get_signal_strength(self, interface):
         try:
-            output = subprocess.check_output(["/sbin/iwconfig", interface]).decode("utf-8")
+            output = subprocess.check_output(["/usr/sbin/iw", "dev", interface, "link"],
+                                             encoding="utf-8",
+                                             stderr=subprocess.DEVNULL)
             signal_strength = re.search(r"Signal level=(-\d+)", output)
             if signal_strength:
                 return int(signal_strength.group(1))
             return 0
         except FileNotFoundError:
-            print("iwconfig command not found. Please ensure it's installed and in your PATH.")
+            print("iw command not found. Please ensure it's installed and in your PATH.")
             return -1
         except subprocess.CalledProcessError as e:
-            print(f"Error executing iwconfig: {e}")
+            print(f"Error executing iw: {e}")
             return -1
         except Exception as e:
             print(f"An error occurred: {e}")
@@ -107,7 +113,7 @@ class SystemInfo(threading.Thread):
         self.__flag.set()
 
     def run(self):
-        self.eth0_ip = self.get_ip_address('eth0')
+        self.end0_ip = self.get_ip_address('end0')
         self.wlan_ip = self.get_ip_address(self.net_interface)
         self.wifi_mode = self.get_wifi_mode()
         self.wifi_rssi = self.get_signal_strength(self.net_interface)
@@ -125,7 +131,7 @@ class SystemInfo(threading.Thread):
             time.sleep(0.5)
             self.wlan_ip = self.get_ip_address(self.net_interface)
             time.sleep(0.5)
-            self.eth0_ip = self.get_ip_address('eth0')
+            self.end0_ip = self.get_ip_address('end0')
             time.sleep(0.5)
             self.cpu_load = psutil.cpu_percent(interval = self.update_interval)
             self.__flag.wait()

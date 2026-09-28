@@ -3,20 +3,8 @@ from base_ctrl import BaseController
 import threading
 import yaml, os
 
-# raspberry pi version check.
-def is_raspberry_pi5():
-    with open('/proc/cpuinfo', 'r') as file:
-        for line in file:
-            if 'Model' in line:
-                if 'Raspberry Pi 5' in line:
-                    return True
-                else:
-                    return False
-
-if is_raspberry_pi5():
-    base = BaseController('/dev/ttyAMA0', 115200)
-else:
-    base = BaseController('/dev/serial0', 115200)
+# Orange Pi 4 Pro — UART7
+base = BaseController('/dev/ttyS7', 115200)
 
 threading.Thread(target=lambda: base.breath_light(15), daemon=True).start()
 
@@ -515,7 +503,7 @@ def update_data_loop():
     time.sleep(1)
     while 1:
         update_data_websocket_single()
-        eth0 = si.eth0_ip
+        eth0 = si.end0_ip
         wlan = si.wlan_ip
         if eth0:
             base.base_oled(0, f"E:{eth0}")

@@ -1,0 +1,681 @@
+# PROJECT.md — Orange Pi 4 Pro UGV Robot
+
+## 📋 Общая архитектура
+
+**Проект:** Робот на базе Waveshare UGV (WAVE ROVER / General Driver for Robots) с заменой Raspberry Pi на Orange Pi 4 Pro.
+
+**Аппаратная платформа:**
+- **Orange Pi 4 Pro** (Allwinner A733, 8 ядер: 4×A76 + 4×A55, 12 ГБ RAM, NPU 3 TOPS INT8)
+- **General Driver for Robots** (Waveshare, ESP32-WROOM-32UE, 2×MX1919, INA219, OLED SSD1306 0x3C)
+- **2-Axis Pan-Tilt Camera Module** (сервоприводы ST3215, UART)
+- **Шасси WAVE ROVER** (4 мотора, 4 энкодера, 3S Li-Ion UPS)
+- **USB-камера** (навигационная)
+- **CSI-камера** (от Raspberry Pi 4, опционально)
+
+**Архитектура управления:**
+- **Orange Pi 4 Pro** — «верхний мозг»: видео, NPU, веб-интерфейс, стратегия.
+- **ESP32** (на General Driver) — «нижний мозг»: моторы, сервы, INA219, OLED.
+- **Связь:** UART7 (пины 8/10) между Orange Pi и ESP32.
+- **Протокол:** JSON-команды (`{"T":1,"L":0.5,"R":0.5}`).
+
+## 🔌 Распиновка (40-pin)
+
+| Пин Orange Pi 4 Pro | Функция | Пин на General Driver |
+|---|---|---|
+| **8** | UART7 TX | RX (ESP32) |
+| **10** | UART7 RX | TX (ESP32) |
+| **3** | I2C0 SDA | (не используется) |
+| **5** | I2C0 SCL | (не используется) |
+| **19** | I2C2 SDA | (резерв) |
+| **23** | I2C2 SCL | (резерв) |
+| **1** | 3.3V | 3.3V |
+| **2, 4** | 5V | 5V |
+| **6, 9, 14...** | GND | GND |
+
+**Важно:** OLED, INA219, сервы управляются **ESP32** через **внутренние шины**. Orange Pi их **не трогает**.
+
+## 🛠️ Сборка ОС (Armbian)
+
+**Репозиторий для сборки:**
+https://github.com/deece/armbian-mellowflyc5-build/tree/feature/sunxi-a733-orangepi4pro
+
+**Pull Request с поддержкой A733:**
+https://github.com/armbian/build/pull/10712
+
+**Команды сборки:**
+```bash
+git clone https://github.com/armbian/build.git
+cd armbian-build
+git fetch origin refs/pull/10712/head:pr-10712
+git checkout pr-10712
+
+./compile.sh BOARD=orangepi4pro BRANCH=edge RELEASE=trixie \
+  BUILD_DESKTOP=no BUILD_MINIMAL=yes \
+  KERNEL_CONFIGURE=no KERNEL_BTF=no KERNEL_GIT=shallow
+Результат:
+
+Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_edge_7.2.8_minimal.img (edge, Linux 7.2.8)
+
+Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_vendor_6.6.98_minimal.img (vendor, Linux 6.6.98)
+
+Что включено в сборку:
+
+Ядро 7.2.8-edge-sun60iw2 (edge) или 6.6.98-vendor-sun60iw2 (vendor)
+
+DTB: sun60i-a733-orangepi-4-pro.dtb
+
+NPU: vipcore.ko (драйвер), libVIPhal.so, libNBGlinker.so (userspace)
+
+Утилиты NPU: /usr/bin/lenet, /usr/bin/vpm_run
+
+Модели NPU: /etc/npu/lenet/, /etc/npu/vpm_run/
+
+Важно: Vendor-сборка (6.6.98) не содержит NPU-утилит. Edge-сборка (7.2.8) содержит их.
+💾 Установка ОС
+Запись на SD-карту:
+# На Ubuntu (VirtualBox)
+unxz Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_edge_7.2.8_minimal.img.xz
+sudo dd if=Armbian-...-minimal.img of=/dev/sdX bs=4M status=progress
+sync
+Первый запуск:
+
+Вставить SD-карту в Orange Pi 4 Pro.
+
+Подключить Ethernet + HDMI.
+
+Загрузиться.
+
+Пройти armbian-firstlogin (через HDMI-монитор + клавиатуру).
+
+Сменить пароль root, создать пользователя.
+# На Orange Pi
+armbian-install
+# Выбрать eMMC, следовать инструкциям
+# После завершения — выключить, вытащить SD, загрузиться с eMMC
+
+
+Важно: eMMC-модуль (32 ГБ) подключается в штатный разъём платы. После установки — загрузка с eMMC.
+
+
+## ⚙️ Настройка интерфейсов
+
+**UART7 (пины 8/10):**
+```bash
+# Активация через armbian-config
+sudo armbian-config
+# System → Kernel → Manage device tree overlays
+# Включить: uart7
+# Сохранить, выйти, перезагрузиться
+
+# Проверка
+ls -la /dev/ttyS7
+# Должно быть: crw-rw---- 1 root dialout 241, 7 ... /dev/ttyS7
+
+# Loopback-тест (замкнуть пины 8 и 10)
+picocom -b 115200 /dev/ttyS7
+# Печатать символы → должны эхо-возвращаться
+# Выход: Ctrl+A, Ctrl+Q
+I2C2 (пины 19/23):
+# Активация через armbian-config
+sudo armbian-config
+# System → Kernel → Manage device tree overlays
+# Включить: i2c2
+# Сохранить, выйти, перезагрузиться
+
+# Проверка
+ls -la /dev/i2c-2
+# Должно быть: crw------- 1 root root 89, 2 ... /dev/i2c-2
+
+# Сканирование шины
+apt install -y i2c-tools
+i2cdetect -y 2
+# Должно быть пусто (если ничего не подключено)
+armbianEnv.txt (после активации):
+overlays=i2c2 uart7
+
+📦 Установка зависимостей
+Системные пакеты:
+sudo apt update
+sudo apt install -y \
+    git python3-pip python3-venv python3-dev \
+    cmake build-essential \
+    i2c-tools picocom \
+    unzip espeak-ng libespeak1 \
+    libopenblas-dev liblapack-dev libhdf5-dev \
+    libjpeg-dev libtiff-dev libpng-dev \
+    libavcodec-dev libavformat-dev libswscale-dev \
+    libv4l-dev libxvidcore-dev libx264-dev \
+    libgtk-3-dev libcanberra-gtk3-module \
+    gfortran libfreetype-dev libharfbuzz-dev \
+    libfribidi-dev libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev \
+    libgstreamer-plugins-bad1.0-dev
+
+Python-зависимости (venv):
+
+cd ~/ugv_rpi
+python3 -m venv ugv-env
+source ugv-env/bin/activate
+pip install --upgrade pip
+
+requirements.txt (адаптированный под Python 3.13):
+
+# Веб-сервер
+Flask==3.0.3
+Flask-SocketIO==5.3.6
+Werkzeug==3.0.3
+Jinja2==3.1.4
+itsdangerous==2.2.0
+blinker==1.8.2
+
+# WebSocket / WebRTC
+python-socketio==5.11.2
+python-engineio==4.9.1
+aiortc==1.15.0
+av==17.1.0
+simplejpeg==1.9.0
+aioice==0.10.2
+pyee==14.0.0
+pylibsrtp==1.0.0
+cryptography==50.0.1
+
+# Работа с данными
+numpy==1.26.4
+PyYAML==6.0.1
+requests==2.32.3
+psutil==5.9.8
+pyserial==3.5
+
+# Обработка изображений
+opencv-python-headless==4.10.0.84
+Pillow==11.3.0
+imutils==0.5.4
+
+# Дополнительные (не в requirements.txt, но нужны)
+imageio==2.38.0
+pygame-ce==2.5.8
+pyttsx3==2.99
+netifaces==0.11.0
+
+Установка:
+
+pip install -r requirements.txt
+pip install imageio pygame-ce pyttsx3 netifaces
+
+Ключевые моменты:
+
+Pillow 11.3.0 (не 10.3.0 — та не работает с Python 3.13).
+
+pygame-ce (не pygame — у pygame нет wheel для Python 3.13 + ARM64).
+
+av 17.1.0 (не 12.3.0 — та не работает).
+
+aiortc 1.15.0 (не 1.8.0).
+
+🧠 NPU: Установка и настройка
+Драйвер NPU (уже в ядре):
+
+ls -la /dev/vipcore
+# crw-rw-rw- 1 root root 199, 0 ... /dev/vipcore
+
+lsmod | grep vipcore
+# vipcore 270336 0
+
+dmesg | grep -i vipcore
+# npu[152][152] vipcore, platform driver init
+# npu[152][152] vipcore, device_cnt=1, core_cnt=1
+
+Userspace NPU (перенос из edge-образа):
+
+Из edge-образа (Armbian-...-edge...img) были скопированы:
+
+/usr/bin/lenet — утилита тестирования LeNet
+
+/usr/bin/vpm_run — утилита запуска NBG
+
+/usr/lib/aarch64-linux-gnu/libVIPhal.so — HAL
+
+/usr/lib/aarch64-linux-gnu/libNBGlinker.so — линкер
+
+/etc/npu/ — модели (lenet, vpm_run)
+
+Установка (на Orange Pi):
+
+cp ~/npu-files/lenet /usr/bin/
+cp ~/npu-files/vpm_run /usr/bin/
+chmod +x /usr/bin/lenet /usr/bin/vpm_run
+
+cp ~/npu-files/libVIPhal.so /usr/lib/aarch64-linux-gnu/
+cp ~/npu-files/libNBGlinker.so /usr/lib/aarch64-linux-gnu/
+
+mkdir -p /etc/npu
+cp -r ~/npu-files/npu/lenet /etc/npu/
+cp -r ~/npu-files/npu/vpm_run /etc/npu/
+
+Тест NPU:
+
+lenet /etc/npu/lenet/model/lenet.nb /etc/npu/lenet/input_data/lenet.dat
+# Вывод: inference ~0.36 ms
+
+cd /etc/npu/vpm_run
+vpm_run -s sample.txt -l 1 -d 0
+# Вывод: inference ~2979 us
+
+Model Zoo (YOLOv5s):
+
+# На Ubuntu (VirtualBox)
+wget https://dl.radxa.com/cubie/allwinner-model-zoo.tar.gz
+tar -xzf allwinner-model-zoo.tar.gz -C ~/awnpu-zoo/
+
+# Скопировать на Orange Pi
+scp -r ~/awnpu-zoo/awnpu_model_zoo-v0.9.0-*/examples/yolov5 \
+    root@<IP>:/root/npu-files/
+scp -r ~/awnpu-zoo/awnpu_model_zoo-v0.9.0-*/3rdparty \
+    root@<IP>:/root/npu-files/zoo/
+scp -r ~/awnpu-zoo/awnpu_model_zoo-v0.9.0-*/common \
+    root@<IP>:/root/npu-files/zoo/
+scp -r ~/awnpu-zoo/awnpu_model_zoo-v0.9.0-*/cmake_toolchain \
+    root@<IP>:/root/npu-files/zoo/
+
+Сборка YOLOv5s демо:
+
+# На Orange Pi
+cd /root/npu-files/zoo/3rdparty/opencv/
+unzip opencv-4.9.0-aarch64-linux-sunxi-glibc.zip
+
+cd /root/npu-files/zoo/examples/yolov5
+mkdir -p build && cd build
+
+# Правка CMakeLists.txt: заменить CMAKE_C_COMPILER на TARGET_NAME
+sed -i 's|elseif(CMAKE_C_COMPILER MATCHES "aarch64")|elseif(TARGET_NAME STREQUAL "A733")|' ../CMakeLists.txt
+
+# Сборка
+cmake .. -DTARGET_NAME=A733 -DCMAKE_SYSTEM_NAME=Linux
+make -j4
+
+Запуск YOLOv5s:
+
+cd /root/npu-files/zoo/examples/yolov5/build
+./yolov5_demo_a733 -nb ../model/yolov5s_rt_uint8_a733.nb \
+                   -i ../model/dog.jpg -l 1 -m 10
+
+
+Результат:
+
+detection num: 3
+16:  91%, [ 135,  221,  311,  535], dog
+ 2:  67%, [ 470,   74,  688,  173], car
+ 1:  61%, [ 155,  118,  573,  424], bicycle
+
+Скорость: ~25 мс на кадр (~39 FPS).
+
+
+## 🐍 Python-обёртка для NPU (yolov5_npu.py)
+
+**Файл:** `~/ugv_rpi/yolov5_npu.py`
+
+**Назначение:** Вызов YOLOv5s на NPU из Python через `subprocess`.
+
+**Код:**
+```python
+"""
+Python-обёртка для YOLOv5s на NPU через subprocess.
+Вызывает yolov5_demo_a733 и парсит результат.
+"""
+import subprocess
+import re
+import os
+
+# Пути к демо и модели
+DEMO_PATH = "/root/npu-files/zoo/examples/yolov5/build/yolov5_demo_a733"
+MODEL_PATH = "/root/npu-files/zoo/examples/yolov5/model/yolov5s_rt_uint8_a733.nb"
+LD_LIBRARY_PATH = "/root/npu-files/zoo/common/npuruntime/lib_linux_aarch64/A733"
+
+COCO_CLASSES = [
+    'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck',
+    'boat', 'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench',
+    'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra',
+    'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee',
+    'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove',
+    'skateboard', 'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup',
+    'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange',
+    'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch',
+    'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse',
+    'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink',
+    'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier',
+    'toothbrush'
+]
+
+def detect(image_path):
+    """
+    Запускает YOLOv5s на NPU для указанного изображения.
+    Возвращает список детекций.
+    """
+    env = os.environ.copy()
+    env['LD_LIBRARY_PATH'] = LD_LIBRARY_PATH
+    
+    result = subprocess.run(
+        [DEMO_PATH, '-nb', MODEL_PATH, '-i', image_path, '-l', '1', '-m', '10'],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30
+    )
+    
+    detections = []
+    lines = result.stderr.split('\n')  # ВАЖНО: stderr, а не stdout!
+    for line in lines:
+        match = re.match(r'\s*(\d+):\s+(\d+)%,\s+\[\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\],\s+(\w+)', line)
+        if match:
+            class_id = int(match.group(1))
+            confidence = int(match.group(2)) / 100.0
+            x0, y0, x1, y1 = map(int, match.groups()[2:6])
+            class_name = match.group(7)
+            detections.append({
+                'class': class_name,
+                'class_id': class_id,
+                'confidence': confidence,
+                'bbox': [x0, y0, x1, y1]
+            })
+    
+    return detections
+
+
+if __name__ == '__main__':
+    image = "/root/npu-files/zoo/examples/yolov5/model/dog.jpg"
+    print(f"Testing on {image}...")
+    detections = detect(image)
+    for det in detections:
+        print(f"  {det['class']}: {det['confidence']*100:.0f}% at {det['bbox']}")
+
+Важно: Демо выводит результат в stderr, а не в stdout! Поэтому парсим result.stderr.
+
+🔧 Адаптация кода ugv_rpi
+
+base_ctrl.py
+Изменение: UART-порт.
+
+# Было (Raspberry Pi):
+base = BaseController('/dev/ttyAMA0', 115200)
+
+# Стало (Orange Pi 4 Pro):
+base = BaseController('/dev/ttyS7', 115200)
+
+Команда замены:
+
+sed -i "s|/dev/ttyAMA0|/dev/ttyS7|g" base_ctrl.py
+
+app.py
+Изменение 1: UART-порт + удаление блока проверки Raspberry Pi.
+
+# Было:
+def is_raspberry_pi5():
+    with open('/proc/cpuinfo', 'r') as file:
+        for line in file:
+            if 'Model' in line:
+                if 'Raspberry Pi 5' in line:
+                    return True
+                else:
+                    return False
+
+if is_raspberry_pi5():
+    base = BaseController('/dev/ttyAMA0', 115200)
+else:
+    base = BaseController('/dev/serial0', 115200)
+
+# Стало:
+# Orange Pi 4 Pro — UART7
+base = BaseController('/dev/ttyS7', 115200)
+
+Изменение 2: eth0_ip → end0_ip (в app.py).
+
+sed -i 's/si\.eth0_ip/si.end0_ip/g' app.py
+
+cv_ctrl.py
+Изменение 1: Оборачиваем импорты в try/except.
+
+try:
+    import mediapipe as mp
+    MEDIAPIPE_AVAILABLE = True
+except ImportError:
+    MEDIAPIPE_AVAILABLE = False
+    print("mediapipe not available — face/hand/pose detection disabled")
+    mp = None
+
+try:
+    from picamera2 import Picamera2
+    from picamera2.encoders import H264Encoder, Encoder
+    from picamera2.outputs import FfmpegOutput
+    CSI_CAMERA_AVAILABLE = True
+except ImportError:
+    CSI_CAMERA_AVAILABLE = False
+    print("picamera2 not available — CSI camera disabled")
+
+try:
+    import depthai as dai
+    OAK_CAMERA_AVAILABLE = True
+except ImportError:
+    OAK_CAMERA_AVAILABLE = False
+    print("depthai not available — OAK camera disabled")
+
+Изменение 2: Блоки mediapipe в __init__ — обёрнуты в if MEDIAPIPE_AVAILABLE:.
+
+Изменение 3: Блоки CSI/OAK — добавлены проверки CSI_CAMERA_AVAILABLE, OAK_CAMERA_AVAILABLE.
+
+Изменение 4: Инициализация NPU (вместо cv2.dnn).
+
+# Было:
+self.net = cv2.dnn.readNetFromCaffe(thisPath + '/models/deploy.prototxt', ...)
+self.class_names = [...]
+
+# Стало:
+import yolov5_npu
+self.yolov5_npu = yolov5_npu
+self.npu_temp_path = "/tmp/yolo_input.jpg"
+
+Изменение 5: Функция cv_detect_objects — использует NPU.
+
+def cv_detect_objects(self, img):
+    overlay_buffer = np.zeros_like(img)
+    cv2.putText(overlay_buffer, 'NPU YOLOv5s', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    
+    # Сохраняем кадр во временный файл
+    cv2.imwrite(self.npu_temp_path, img)
+    
+    # Запускаем NPU-инференс
+    try:
+        detections = self.yolov5_npu.detect(self.npu_temp_path)
+    except Exception as e:
+        print(f"[cv_detect_objects] NPU error: {e}")
+        self.overlay = overlay_buffer
+        return
+    
+    # Рисуем bounding boxes
+    for det in detections:
+        x0, y0, x1, y1 = det['bbox']
+        label = f"{det['class']}: {det['confidence']*100:.0f}%"
+        cv2.rectangle(overlay_buffer, (x0, y0), (x1, y1), (0, 255, 0), 2)
+        y = y0 - 10 if y0 - 10 > 10 else y0 + 20
+        cv2.putText(overlay_buffer, label, (x0, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    
+    self.overlay = overlay_buffer
+
+
+os_info.py
+
+# Было:
+temperature_str = os.popen('vcgencmd measure_temp').readline()
+
+# Стало:
+with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+    temperature_str = f.read()
+
+Изменение 2: iwconfig → iw (Wi-Fi).
+
+# get_wifi_mode
+result = subprocess.check_output(['/usr/sbin/iw', 'dev', 'wlan0', 'info'],
+                                 encoding='utf-8',
+                                 stderr=subprocess.DEVNULL)
+
+# get_signal_strength
+output = subprocess.check_output(["/usr/sbin/iw", "dev", interface, "link"],
+                                 encoding="utf-8",
+                                 stderr=subprocess.DEVNULL)
+
+
+Изменение 3: eth0 → end0 (Ethernet).
+
+sed -i 's/'"'"'eth0'"'"'/'"'"'end0'"'"'/g' os_info.py
+sed -i 's/self\.eth0_ip/self.end0_ip/g' os_info.py
+
+
+🌐 Веб-интерфейс: Исправления
+templates/index.html
+Проблема: Кнопки OBJECTS, COLOR, HAND GS использовали onclick="cmdSend(cv_objs,0,0);", который отправлял {A,B,C} через WebSocket (требует ESP32).
+
+Решение: Заменить на onclick="sendCmdObjs();" и добавить функции в control.js.
+
+Строки 244-246 (после правки):
+
+<div><button onclick="sendCmdObjs();" class="ctl_btn">OBJECTS</button></div>
+<div><button onclick="sendCmdClor();" class="ctl_btn">COLOR</button></div>
+<div><button onclick="sendCmdHand();" class="ctl_btn">HAND GS</button></div>
+
+
+templates/control.js
+Добавлены функции:
+
+
+function sendCmdObjs() {
+    sendCommand('base -c {"T":' + cv_objs + '}');
+}
+
+function sendCmdClor() {
+    sendCommand('base -c {"T":' + cv_clor + '}');
+}
+
+function sendCmdHand() {
+    sendCommand('base -c {"T":' + mp_hand + '}');
+}
+
+function sendCommand(command) {
+    fetch('/send_command', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'command=' + encodeURIComponent(command)
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('Command sent:', command, data);
+    })
+    .catch(error => {
+        console.error('Error:', error);
+    });
+}
+
+Исправлена speedCtrl:
+
+function speedCtrl(inputSpd){
+    speed_rate = inputSpd;
+    defaultSpeed = speed_rate;
+    var spdCtrlBtn = document.getElementById("speed_ctrl_btn");
+    var spdbuttons = spdCtrlBtn.getElementsByTagName("button");
+    removeButtonsClass(spdbuttons);
+    if (speed_rate <= 0.30) {
+        spdbuttons[0].classList.add("ctl_btn_active");
+    } else if (speed_rate > 0.30 && speed_rate < 0.70) {
+        spdbuttons[1].classList.add("ctl_btn_active");
+    } else if (speed_rate >= 0.70) {
+        spdbuttons[2].classList.add("ctl_btn_active");
+    }
+    // Отправляем команду в UART
+    sendCommand('base -c {"T":138,"L":' + speed_rate + ',"R":' + speed_rate + '}');
+}
+
+Версионирование control.js в index.html:
+
+<script src="./control.js?v=2"></script>
+
+Важно: Параметр ?v=2 нужен, чтобы браузер не кэшировал старую версию.
+
+🚀 Автозапуск app.py (systemd)
+Файл: /etc/systemd/system/ugv.service
+
+[Unit]
+Description=UGV Robot App
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/ugv_rpi
+ExecStart=/root/ugv_rpi/ugv-env/bin/python /root/ugv_rpi/app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+Активация:
+
+sudo systemctl daemon-reload
+sudo systemctl enable ugv.service
+sudo systemctl start ugv.service
+sudo systemctl status ugv.service
+
+Логи:
+
+journalctl -u ugv.service -f
+
+
+## 📡 JSON-команды (ESP32)
+
+### Команды управления (отправляются через UART7)
+
+| Команда | JSON | Описание |
+|---|---|---|
+| **Движение** | `{"T":1,"L":0.5,"R":0.5}` | L/R: -1.0 до 1.0 |
+| **PWM напрямую** | `{"T":11,"L":164,"R":164}` | L/R: -255 до 255 |
+| **Скорость (rate)** | `{"T":138,"L":0.3,"R":0.3}` | Масштаб скорости |
+| **OLED** | `{"T":3,"lineNum":0,"Text":"..."}` | Вывод текста |
+| **Модуль** | `{"T":4,"cmd":0}` | 0=Null, 1=RoArm, 2=PT |
+| **PT сервы** | `{"T":133,"X":0,"Y":0,"SPD":0,"ACC":0}` | Пан-тилт |
+| **Свет** | `{"T":132,"IO4":255,"IO5":255}` | IO4/IO5: 0-255 |
+| **Телеметрия** | `{"T":130}` | Запрос данных |
+| **Поток телеметрии** | `{"T":131,"cmd":1}` | Вкл/выкл |
+| **Интервал телеметрии** | `{"T":142,"cmd":0}` | мс |
+
+### CV-команды (детекция)
+
+| Команда | T | Описание |
+|---|---|---|
+| **None** | 10301 | Отключить детекцию |
+| **Motion** | 10302 | Детекция движения |
+| **Faces** | 10303 | Детекция лиц |
+| **Objects** | 10304 | Детекция объектов (NPU YOLOv5s) |
+| **Color** | 10305 | Детекция цвета |
+| **Hand GS** | 10306 | Жесты рук |
+| **Auto** | 10307 | Авто-режим |
+| **MP Face** | 10308 | MediaPipe Face |
+| **MP Pose** | 10309 | MediaPipe Pose |
+
+### Формат отправки (через `base_ctrl.py`)
+
+```python
+# В app.py (обработчик /send_command)
+cmdline_ctrl('base -c {"T":10304}')
+
+# cmdline_ctrl парсит:
+# args = ['base', '-c', '{"T":10304}']
+# base.base_json_ctrl(json.loads(args[2]))
+# → UART7: {"T":10304}\n
+
+
+🔗 GitHub-репозиторий
+Форк: https://github.com/ZHNovell/ugv_rpi
+
+Оригинал: https://github.com/waveshareteam/ugv_rpi
+
+

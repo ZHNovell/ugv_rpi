@@ -819,6 +819,8 @@ function speedCtrl(inputSpd){
     } else if (speed_rate >= 0.70) {
         spdbuttons[2].classList.add("ctl_btn_active");
     }
+    // Отправляем команду в UART
+    sendCommand('base -c {"T":138,"L":' + speed_rate + ',"R":' + speed_rate + '}');
 }
 
 var steady_mode = false;

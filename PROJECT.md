@@ -678,4 +678,61 @@ cmdline_ctrl('base -c {"T":10304}')
 
 Оригинал: https://github.com/waveshareteam/ugv_rpi
 
+⚠️ Известные проблемы:
 
+1. - 3. не актуальны.
+
+4. Pillow 10.3.0 не собирается на Python 3.13
+Решение: Использовать Pillow 11.3.0.
+
+5. pygame не собирается на Python 3.13 + ARM64
+Решение: Использовать pygame-ce.
+
+6. mediapipe не устанавливается на Python 3.13 + ARM64
+Решение: Обёрнут в try/except. Функции MediaPipe отключены.
+
+7. picamera2, depthai не устанавливаются
+Решение: Обёрнуты в try/except. CSI и OAK камеры отключены.
+
+8. NPU-утилиты отсутствуют в vendor-сборке
+Причина: Vendor-сборка (6.6.98) не содержит vpm_run, lenet.
+Решение: Перенесены из edge-сборки (7.2.8) вручную.
+
+9. CMAKE_C_COMPILER не содержит aarch64
+Причина: В CMakeLists.txt условие elseif(CMAKE_C_COMPILER MATCHES "aarch64") не срабатывает.
+Решение: Заменить на elseif(TARGET_NAME STREQUAL "A733").
+
+10. Демо YOLOv5s выводит результат в stderr, не stdout
+Решение: В yolov5_npu.py парсим result.stderr.
+
+Долгосрочное
+□ MediaPipe на NPU — если получится портировать.
+□ YOLOv8 — более точная модель.
+□ Автопилот — SLAM или визуальная одометрия.
+□ Голосовое управление — через pyttsx3 + распознавание.
+📚 Полезные ссылки
+Orange Pi 4 Pro: http://www.orangepi.org/html/hardWare/computerAndMicrocontrollers/details/Orange-Pi-4-Pro.html
+
+Waveshare WAVE ROVER: https://www.waveshare.com/wiki/WAVE_ROVER
+
+General Driver for Robots: https://www.waveshare.com/wiki/General_Driver_for_Robots
+
+2-Axis Pan-Tilt: https://www.waveshare.com/wiki/2-Axis_Pan-Tilt_Camera_Module
+
+ugv_rpi (GitHub): https://github.com/waveshareteam/ugv_rpi
+
+ugv_base_general (GitHub): https://github.com/waveshareteam/ugv_base_general
+
+Armbian PR #10712 (A733): https://github.com/armbian/build/pull/10712
+
+Allwinner Model Zoo: https://dl.radxa.com/cubie/allwinner-model-zoo.tar.gz
+
+👥 Авторы
+ZHNovell — адаптация под Orange Pi 4 Pro, NPU, веб-интерфейс.
+
+Waveshare — оригинальный ugv_rpi.
+
+deece — поддержка A733 в Armbian.
+
+📅 История изменений
+2026-09-28: Первый запуск Orange Pi 4 Pro, UART7, I2C2, NPU, YOLOv5s, кнопки веб-интерфейса.

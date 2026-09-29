@@ -531,7 +531,8 @@ sed -i 's/self\.eth0_ip/self.end0_ip/g' os_info.py
 
 🌐 Веб-интерфейс: Исправления
 templates/index.html
-Проблема: Кнопки OBJECTS, COLOR, HAND GS использовали onclick="cmdSend(cv_objs,0,0);", который отправлял {A,B,C} через WebSocket (требует ESP32).
+Проблема: Кнопки OBJECTS, COLOR, HAND GS использовали onclick="cmdSend(cv_objs,0,0);",
+который отправлял {A,B,C} через WebSocket (требует ESP32).
 
 Решение: Заменить на onclick="sendCmdObjs();" и добавить функции в control.js.
 
@@ -785,7 +786,8 @@ elif not self.set_video_record_flag and self.video_record_status_flag:
     self.writer.release()
 
 
-Важно: mp4v (MPEG-4 Part 2) не воспроизводится в браузерах. Для H.264 нужен VPU (CedarC), которого нет в vendor-сборке. Решение: пересобрать Armbian с PR #10835.
+Важно: mp4v (MPEG-4 Part 2) не воспроизводится в браузерах. Для H.264 нужен VPU (CedarC), которого нет в vendor-сборке.
+Решение: пересобрать Armbian с PR #10835.
 
 🧠 NPU YOLOv5s на видео
 Результат: 39 FPS, bounding boxes в реальном времени.

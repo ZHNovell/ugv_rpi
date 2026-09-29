@@ -45,37 +45,30 @@
 - [PR #10712 (A733)](https://github.com/armbian/build/pull/10712)
 
 **Команды сборки:**
+
 ```bash
 git clone https://github.com/armbian/build.git
 cd armbian-build
 git fetch origin refs/pull/10712/head:pr-10712
 git checkout pr-10712
-./compile.sh BOARD=orangepi4pro BRANCH=edge RELEASE=trixie \
-```
 
+./compile.sh BOARD=orangepi4pro BRANCH=edge RELEASE=trixie \
   BUILD_DESKTOP=no BUILD_MINIMAL=yes \
   KERNEL_CONFIGURE=no KERNEL_BTF=no KERNEL_GIT=shallow
 ```
 
-Результат:
+**Результат:**
+- `Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_edge_7.2.8_minimal.img` (edge, Linux 7.2.8)
+- `Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_vendor_6.6.98_minimal.img` (vendor, Linux 6.6.98)
 
-Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_edge_7.2.8_minimal.img (edge, Linux 7.2.8)
+**Что включено:**
+- Ядро `7.2.8-edge-sun60iw2` (edge) или `6.6.98-vendor-sun60iw2` (vendor).
+- DTB: `sun60i-a733-orangepi-4-pro.dtb`.
+- NPU: `vipcore.ko` (драйвер), `libVIPhal.so`, `libNBGlinker.so` (userspace).
+- Утилиты NPU: `/usr/bin/lenet`, `/usr/bin/vpm_run`.
+- Модели NPU: `/etc/npu/lenet/`, `/etc/npu/vpm_run/`.
 
-Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_vendor_6.6.98_minimal.img (vendor, Linux 6.6.98)
-
-Что включено:
-
-Ядро 7.2.8-edge-sun60iw2 (edge) или 6.6.98-vendor-sun60iw2 (vendor).
-
-DTB: sun60i-a733-orangepi-4-pro.dtb.
-
-NPU: vipcore.ko (драйвер), libVIPhal.so, libNBGlinker.so (userspace).
-
-Утилиты NPU: /usr/bin/lenet, /usr/bin/vpm_run.
-
-Модели NPU: /etc/npu/lenet/, /etc/npu/vpm_run/.
-
-Важно: Vendor-сборка (6.6.98) не содержит NPU-утилит. Edge-сборка (7.2.8) содержит их.
+**Важно:** Vendor-сборка (6.6.98) **не содержит** NPU-утилит. Edge-сборка (7.2.8) **содержит** их.
 
 💾 Установка ОС
 Запись на SD-карту:

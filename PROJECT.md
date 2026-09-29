@@ -55,12 +55,7 @@ git clone https://github.com/armbian/build.git
 cd armbian-build
 git fetch origin refs/pull/10712/head:pr-10712
 git checkout pr-10712
-```
-
-```bash
 ./compile.sh BOARD=orangepi4pro BRANCH=edge RELEASE=trixie \
-```
-
   BUILD_DESKTOP=no BUILD_MINIMAL=yes \
   KERNEL_CONFIGURE=no KERNEL_BTF=no KERNEL_GIT=shallow
 ```
@@ -89,17 +84,12 @@ NPU: vipcore.ko (драйвер), libVIPhal.so, libNBGlinker.so (userspace).
 Запись на SD-карту:
 
 ```bash
-```
-
-```bash
 # На Ubuntu (VirtualBox)
-```
-
 unxz Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_edge_7.2.8_minimal.img.xz
 sudo dd if=Armbian-...-minimal.img of=/dev/sdX bs=4M status=progress
 sync
-Первый запуск:
 ```
+Первый запуск:
 
 Вставить SD-карту в Orange Pi 4 Pro.
 
@@ -114,9 +104,6 @@ sync
 Перенос на eMMC:
 
 ```bash
-```
-
-```bash
 # На Orange Pi
 armbian-install
 # Выбрать eMMC, следовать инструкциям
@@ -124,10 +111,8 @@ armbian-install
 ```
 
 Важно: eMMC-модуль (32 ГБ) подключается в штатный разъём платы.
-```
-
-⚙️ Настройка интерфейсов
-UART7 (пины 8/10)
+## ⚙️ Настройка интерфейсов
+### UART7 (пины 8/10)
 ```bash
 # Активация через armbian-config
 sudo armbian-config
@@ -135,10 +120,6 @@ sudo armbian-config
 # Включить: uart7
 # Сохранить, выйти, перезагрузиться
 
-# Проверка
-```
-
-```bash
 ls -la /dev/ttyS7
 # Должно быть: crw-rw---- 1 root dialout 241, 7 ... /dev/ttyS7
 ```
@@ -148,9 +129,8 @@ ls -la /dev/ttyS7
 picocom -b 115200 /dev/ttyS7
 # Печатать символы → должны эхо-возвращаться
 # Выход: Ctrl+A, Ctrl+Q
-```
 
-I2C2 (пины 19/23)
+### I2C2 (пины 19/23)
 ```bash
 # Активация через armbian-config
 sudo armbian-config
@@ -173,24 +153,19 @@ i2cdetect -y 2
 ```
 
 armbianEnv.txt (после активации):
-```
 
-text
+```text
 overlays=i2c2 uart7
-📦 Установка зависимостей
-Системные пакеты
-```bash
 ```
+## 📦 Установка зависимостей
+### Системные пакеты
+
 
 ```bash
 sudo apt update
 sudo apt install -y \
     git python3-pip python3-venv python3-dev \
     cmake build-essential \
-```
-
-    i2c-tools picocom \
-    unzip espeak-ng libespeak1 \
     libopenblas-dev liblapack-dev libhdf5-dev \
     libjpeg-dev libtiff-dev libpng-dev \
     libavcodec-dev libavformat-dev libswscale-dev \
@@ -200,7 +175,7 @@ sudo apt install -y \
     libfribidi-dev libgstreamer1.0-dev \
     libgstreamer-plugins-base1.0-dev \
     libgstreamer-plugins-bad1.0-dev
-Python-зависимости (venv)
+### Python-зависимости (venv)
 ```bash
 cd ~/ugv_rpi
 python3 -m venv ugv-env
@@ -208,10 +183,10 @@ source ugv-env/bin/activate
 pip install --upgrade pip
 ```
 
-requirements.txt (Python 3.13):
+### requirements.txt (Python 3.13):
 ```
 
-text
+```text
 # Веб-сервер
 Flask==3.0.3
 Flask-SocketIO==5.3.6
@@ -249,8 +224,6 @@ pygame-ce==2.5.8
 pyttsx3==2.99
 netifaces==0.11.0
 Установка:
-
-```bash
 ```
 
 ```bash
@@ -271,8 +244,6 @@ aiortc 1.15.0 (не 1.8.0).
 
 🧠 NPU: Установка и настройка
 Драйвер NPU (уже в ядре)
-```bash
-```
 
 ```bash
 ls -la /dev/vipcore
@@ -307,9 +278,6 @@ Userspace NPU (перенос из edge-образа)
 Установка:
 
 ```bash
-```
-
-```bash
 cp ~/npu-files/lenet /usr/bin/
 cp ~/npu-files/vpm_run /usr/bin/
 chmod +x /usr/bin/lenet /usr/bin/vpm_run
@@ -327,8 +295,6 @@ cp -r ~/npu-files/npu/vpm_run /etc/npu/
 ```
 
 Тест NPU
-```bash
-```
 
 lenet /etc/npu/lenet/model/lenet.nb /etc/npu/lenet/input_data/lenet.dat
 # Вывод: inference ~0.36 ms
@@ -338,8 +304,6 @@ cd /etc/npu/vpm_run
 vpm_run -s sample.txt -l 1 -d 0
 # Вывод: inference ~2979 us
 Model Zoo (YOLOv5s)
-```bash
-```
 
 ```bash
 # На Ubuntu (VirtualBox)
@@ -390,19 +354,20 @@ cd /root/npu-files/zoo/examples/yolov5/build
 Результат:
 ```
 
-text
+```text
 detection num: 3
 16:  91%, [ 135,  221,  311,  535], dog
  2:  67%, [ 470,   74,  688,  173], car
  1:  61%, [ 155,  118,  573,  424], bicycle
 Скорость: ~25 мс на кадр (~39 FPS).
+```
 
 🐍 Python-обёртка для NPU (yolov5_npu.py)
 Файл: ~/ugv_rpi/yolov5_npu.py
 
 Назначение: Вызов YOLOv5s на NPU из Python через subprocess.
 
-python
+```python
 """
 Python-обёртка для YOLOv5s на NPU через subprocess.
 Вызывает yolov5_demo_a733 и парсит результат.
@@ -410,6 +375,7 @@ Python-обёртка для YOLOv5s на NPU через subprocess.
 import subprocess
 import re
 import os
+```
 
 DEMO_PATH = "/root/npu-files/zoo/examples/yolov5/build/yolov5_demo_a733"
 MODEL_PATH = "/root/npu-files/zoo/examples/yolov5/model/yolov5s_rt_uint8_a733.nb"
@@ -461,15 +427,13 @@ if __name__ == '__main__':
 base_ctrl.py
 Изменение: UART-порт.
 
-python
+```python
 # Было (Raspberry Pi):
 base = BaseController('/dev/ttyAMA0', 115200)
 
 # Стало (Orange Pi 4 Pro):
 base = BaseController('/dev/ttyS7', 115200)
 Команда замены:
-
-```bash
 ```
 
 ```bash
@@ -480,7 +444,7 @@ app.py
 Изменение 1: UART-порт + удаление блока проверки Raspberry Pi.
 ```
 
-python
+```python
 # Было:
 def is_raspberry_pi5():
     with open('/proc/cpuinfo', 'r') as file:
@@ -490,6 +454,7 @@ def is_raspberry_pi5():
                     return True
                 else:
                     return False
+```
 
 if is_raspberry_pi5():
     base = BaseController('/dev/ttyAMA0', 115200)
@@ -502,9 +467,6 @@ base = BaseController('/dev/ttyS7', 115200)
 Изменение 2: eth0_ip → end0_ip.
 
 ```bash
-```
-
-```bash
 sed -i 's/si\.eth0_ip/si.end0_ip/g' app.py
 ```
 
@@ -512,7 +474,7 @@ cv_ctrl.py
 Изменение 1: Оборачиваем импорты в try/except.
 ```
 
-python
+```python
 try:
     import mediapipe as mp
     MEDIAPIPE_AVAILABLE = True
@@ -520,6 +482,7 @@ except ImportError:
     MEDIAPIPE_AVAILABLE = False
     print("mediapipe not available — face/hand/pose detection disabled")
     mp = None
+```
 
 try:
     from picamera2 import Picamera2
@@ -542,7 +505,7 @@ except ImportError:
 
 Изменение 4: Инициализация NPU (вместо cv2.dnn).
 
-python
+```python
 # Было:
 self.net = cv2.dnn.readNetFromCaffe(thisPath + '/models/deploy.prototxt', ...)
 self.class_names = [...]
@@ -553,10 +516,13 @@ self.yolov5_npu = yolov5_npu
 self.npu_temp_path = "/tmp/yolo_input.jpg"
 Изменение 5: Функция cv_detect_objects — использует NPU.
 
-python
+```
+
+```python
 def cv_detect_objects(self, img):
     overlay_buffer = np.zeros_like(img)
     cv2.putText(overlay_buffer, 'NPU YOLOv5s', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+```
 
     cv2.imwrite(self.npu_temp_path, img)
 
@@ -578,7 +544,7 @@ def cv_detect_objects(self, img):
 os_info.py
 Изменение 1: vcgencmd → sysfs.
 
-python
+```python
 # Было:
 temperature_str = os.popen('vcgencmd measure_temp').readline()
 
@@ -587,7 +553,9 @@ with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
     temperature_str = f.read()
 Изменение 2: iwconfig → iw.
 
-python
+```
+
+```python
 # get_wifi_mode
 result = subprocess.check_output(['/usr/sbin/iw', 'dev', 'wlan0', 'info'],
                                  encoding='utf-8',
@@ -598,8 +566,6 @@ output = subprocess.check_output(["/usr/sbin/iw", "dev", interface, "link"],
                                  encoding="utf-8",
                                  stderr=subprocess.DEVNULL)
 Изменение 3: eth0 → end0.
-
-```bash
 ```
 
 ```bash
@@ -614,17 +580,20 @@ templates/index.html
 
 Решение: Заменить на onclick="sendCmdObjs();".
 
-html
+```html
 <div><button onclick="sendCmdObjs();" class="ctl_btn">OBJECTS</button></div>
 <div><button onclick="sendCmdClor();" class="ctl_btn">COLOR</button></div>
 <div><button onclick="sendCmdHand();" class="ctl_btn">HAND GS</button></div>
 templates/control.js
 Добавлены функции:
 
-javascript
+```
+
+```javascript
 function sendCmdObjs() {
     sendCommand('base -c {"T":' + cv_objs + '}');
 }
+```
 
 function sendCmdClor() {
     sendCommand('base -c {"T":' + cv_clor + '}');
@@ -652,7 +621,7 @@ function sendCommand(command) {
 }
 Исправлена speedCtrl:
 
-javascript
+```javascript
 function speedCtrl(inputSpd){
     speed_rate = inputSpd;
     defaultSpeed = speed_rate;
@@ -670,12 +639,15 @@ function speedCtrl(inputSpd){
 }
 Версионирование control.js в index.html:
 
-html
+```
+
+```html
 <script src="./control.js?v=2"></script>
 Важно: Параметр ?v=2 нужен, чтобы браузер не кэшировал старую версию.
+```
 
 templates/style.css
-css
+```css
 .video img{
     width: 960px;
     height: 540px;
@@ -685,10 +657,13 @@ css
 🚀 Автозапуск app.py (systemd)
 Файл: /etc/systemd/system/ugv.service
 
-ini
+```
+
+```ini
 [Unit]
 Description=UGV Robot App
 After=network.target
+```
 
 [Service]
 Type=simple
@@ -712,40 +687,41 @@ sudo systemctl status ugv.service
 Логи:
 
 ```bash
-```
-
-```bash
 journalctl -u ugv.service -f
 ```
 
 📡 JSON-команды (ESP32)
 Команды управления (через UART7)
-Команда	JSON	Описание
-Движение	{"T":1,"L":0.5,"R":0.5}	L/R: -1.0 до 1.0
-PWM напрямую	{"T":11,"L":164,"R":164}	L/R: -255 до 255
-Скорость (rate)	{"T":138,"L":0.3,"R":0.3}	Масштаб скорости
-OLED	{"T":3,"lineNum":0,"Text":"..."}	Вывод текста
-Модуль	{"T":4,"cmd":0}	0=Null, 1=RoArm, 2=PT
-PT сервы	{"T":133,"X":0,"Y":0,"SPD":0,"ACC":0}	Пан-тилт
-Свет	{"T":132,"IO4":255,"IO5":255}	IO4/IO5: 0-255
-Телеметрия	{"T":130}	Запрос данных
-Поток телеметрии	{"T":131,"cmd":1}	Вкл/выкл
-Интервал телеметрии	{"T":142,"cmd":0}	мс
+| Команда | JSON | Описание |
+|---|---|---|
+| Движение | {"T":1,"L":0.5,"R":0.5} | L/R: -1.0 до 1.0 |
+| PWM напрямую | {"T":11,"L":164,"R":164} | L/R: -255 до 255 |
+| Скорость (rate) | {"T":138,"L":0.3,"R":0.3} | Масштаб скорости |
+| OLED | {"T":3,"lineNum":0,"Text":"..."} | Вывод текста |
+| Модуль | {"T":4,"cmd":0} | 0=Null, 1=RoArm, 2=PT |
+| PT сервы | {"T":133,"X":0,"Y":0,"SPD":0,"ACC":0} | Пан-тилт |
+| Свет | {"T":132,"IO4":255,"IO5":255} | IO4/IO5: 0-255 |
+| Телеметрия | {"T":130} | Запрос данных |
+| Поток телеметрии | {"T":131,"cmd":1} | Вкл/выкл |
+| Интервал телеметрии | {"T":142,"cmd":0} | мс |
 CV-команды (детекция)
-Команда	T	Описание
-None	10301	Отключить детекцию
-Motion	10302	Детекция движения
-Faces	10303	Детекция лиц
-Objects	10304	Детекция объектов (NPU YOLOv5s)
-Color	10305	Детекция цвета
-Hand GS	10306	Жесты рук
-Auto	10307	Авто-режим
-MP Face	10308	MediaPipe Face
-MP Pose	10309	MediaPipe Pose
+| Команда | T | Описание |
+|---|---|---|
+| None | 10301 | Отключить детекцию |
+| Motion | 10302 | Детекция движения |
+| Faces | 10303 | Детекция лиц |
+| Objects | 10304 | Детекция объектов (NPU YOLOv5s) |
+| Color | 10305 | Детекция цвета |
+| Hand GS | 10306 | Жесты рук |
+| Auto | 10307 | Авто-режим |
+| MP Face | 10308 | MediaPipe Face |
+| MP Pose | 10309 | MediaPipe Pose |
 Формат отправки (через base_ctrl.py)
-python
+```python
 # В app.py (обработчик /send_command)
 cmdline_ctrl('base -c {"T":10304}')
+```
+
 ```
 
 # cmdline_ctrl парсит:
@@ -782,7 +758,7 @@ v4l2-ctl -d /dev/video0 --list-formats-ext
 fswebcam -d /dev/video0 --no-banner -r 1920x1080 -S 5 ./test.jpg
 Универсальная детекция в cv_ctrl.py:
 
-python
+```python
 def usb_camera_detection(self):
     import glob
     # 1. Быстрая проверка: есть ли /dev/video*
@@ -803,6 +779,7 @@ def usb_camera_detection(self):
         cap.release()
     except Exception as e:
         print(f"USB Camera detection error: {e}")
+```
 
     print("USB Camera not connected (OpenCV failed)")
     return False
@@ -813,7 +790,7 @@ def usb_camera_detection(self):
 
 Решение: cv2.VideoWriter с кодеком mp4v:
 
-python
+```python
 # В cv_ctrl.py (frame_process)
 if self.set_video_record_flag and not self.video_record_status_flag:
     current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -834,6 +811,7 @@ elif not self.set_video_record_flag and self.video_record_status_flag:
     self.video_record_status_flag = False
     self.writer.release()
 Важно: mp4v (MPEG-4 Part 2) не воспроизводится в браузерах. Для H.264 нужен VPU (CedarC) — пересборка Armbian с PR #10835.
+```
 
 🧠 NPU YOLOv5s на видео
 Результат: 39 FPS, bounding boxes в реальном времени.
@@ -853,7 +831,7 @@ YOLOv5s обнаруживает объекты (person, tv, chair и т.д.).
 
 Решение: Локальный cmd_action в handle_command (app.py):
 
-python
+```python
 def handle_command():
     command = request.form['command']
     print("Received command:", command)
@@ -870,6 +848,7 @@ def handle_command():
                 print(f"[handle_command] Local cmd_action executed for T={t_value}")
     except Exception as e:
         print(f"[handle_command] Local cmd_action error: {e}")
+```
 
     try:
         cmdline_ctrl(command)
@@ -885,7 +864,7 @@ def handle_command():
 
 Решение 1: Убрана проверка base_voltage:
 
-javascript
+```javascript
 socket.on('update', function(data) {
     // Убрана проверка base_voltage — она блокировала OSD без ESP32
     try {
@@ -893,26 +872,29 @@ socket.on('update', function(data) {
     }
 });
 Причина 2: Температура в sysfs — millidegrees (24242 = 24.242 °C).
+```
 
 Решение 2: Деление на 1000:
 
-python
+```python
 # os_info.py — get_cpu_temperature
 with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
     temperature_str = f.read().strip()
 temperature = float(temperature_str) / 1000.0
 return round(temperature, 1)
 Причина 3: RSSI — iw dev wlan0 link отдаёт signal: -59 dBm, а код искал Signal level=-59 (старый формат iwconfig).
+```
 
 Решение 3: Новое регулярное выражение:
 
-python
+```python
 # os_info.py — get_signal_strength
 signal_strength = re.search(r"signal:\s*(-\d+)", output)
 if signal_strength:
     return int(signal_strength.group(1))
 return 0
 Результат: OSD полностью работает:
+```
 
 CPU: 8.2%
 
@@ -933,13 +915,15 @@ Videos: 2.76 MB
 
 Решение: base.base_data['v'] if base.base_data else 0:
 
-python
+```python
 # app.py — update_data_websocket_single
 f['fb'][f'base_voltage']:base.base_data['v'] if base.base_data else 0,
 📝 Обновления в CSS
 templates/style.css:
 
-css
+```
+
+```css
 .video img{
     width: 960px;
     height: 540px;
@@ -962,6 +946,7 @@ css
 □ Голосовое управление — через pyttsx3 + распознавание.
 🔗 GitHub-репозиторий
 Форк: ZHNovell/ugv_rpi
+```
 
 Оригинал: waveshareteam/ugv_rpi
 📚 Полезные ссылки

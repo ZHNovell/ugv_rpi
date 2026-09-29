@@ -22,7 +22,6 @@
 
 | Пин Orange Pi 4 Pro | Функция | Пин на General Driver |
 |---|---|---|
-|---|---|---|
 | **8** | UART7 TX | RX (ESP32) |
 |---|---|---|
 | **10** | UART7 RX | TX (ESP32) |
@@ -40,7 +39,6 @@
 | **2, 4** | 5V | 5V |
 |---|---|---|
 | **6, 9, 14...** | GND | GND |
-
 **Важно:** OLED, INA219, сервы управляются **ESP32** через **внутренние шины**. Orange Pi их **не трогает**.
 
 ## 🛠️ Сборка ОС (Armbian)
@@ -56,6 +54,8 @@ cd armbian-build
 git fetch origin refs/pull/10712/head:pr-10712
 git checkout pr-10712
 ./compile.sh BOARD=orangepi4pro BRANCH=edge RELEASE=trixie \
+```
+
   BUILD_DESKTOP=no BUILD_MINIMAL=yes \
   KERNEL_CONFIGURE=no KERNEL_BTF=no KERNEL_GIT=shallow
 ```
@@ -85,6 +85,8 @@ NPU: vipcore.ko (драйвер), libVIPhal.so, libNBGlinker.so (userspace).
 
 ```bash
 # На Ubuntu (VirtualBox)
+```
+
 unxz Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_edge_7.2.8_minimal.img.xz
 sudo dd if=Armbian-...-minimal.img of=/dev/sdX bs=4M status=progress
 sync
@@ -131,6 +133,8 @@ picocom -b 115200 /dev/ttyS7
 # Выход: Ctrl+A, Ctrl+Q
 
 ### I2C2 (пины 19/23)
+```
+
 ```bash
 # Активация через armbian-config
 sudo armbian-config
@@ -160,12 +164,13 @@ overlays=i2c2 uart7
 ## 📦 Установка зависимостей
 ### Системные пакеты
 
-
 ```bash
 sudo apt update
 sudo apt install -y \
     git python3-pip python3-venv python3-dev \
     cmake build-essential \
+```
+
     libopenblas-dev liblapack-dev libhdf5-dev \
     libjpeg-dev libtiff-dev libpng-dev \
     libavcodec-dev libavformat-dev libswscale-dev \
@@ -190,6 +195,8 @@ pip install --upgrade pip
 # Веб-сервер
 Flask==3.0.3
 Flask-SocketIO==5.3.6
+```
+
 Werkzeug==3.0.3
 Jinja2==3.1.4
 itsdangerous==2.2.0
@@ -355,6 +362,8 @@ cd /root/npu-files/zoo/examples/yolov5/build
 ```
 
 ```text
+```
+
 detection num: 3
 16:  91%, [ 135,  221,  311,  535], dog
  2:  67%, [ 470,   74,  688,  173], car
@@ -369,6 +378,8 @@ detection num: 3
 
 ```python
 """
+```
+
 Python-обёртка для YOLOv5s на NPU через subprocess.
 Вызывает yolov5_demo_a733 и парсит результат.
 """
@@ -429,6 +440,8 @@ base_ctrl.py
 
 ```python
 # Было (Raspberry Pi):
+```
+
 base = BaseController('/dev/ttyAMA0', 115200)
 
 # Стало (Orange Pi 4 Pro):
@@ -447,6 +460,8 @@ app.py
 ```python
 # Было:
 def is_raspberry_pi5():
+```
+
     with open('/proc/cpuinfo', 'r') as file:
         for line in file:
             if 'Model' in line:
@@ -477,6 +492,8 @@ cv_ctrl.py
 ```python
 try:
     import mediapipe as mp
+```
+
     MEDIAPIPE_AVAILABLE = True
 except ImportError:
     MEDIAPIPE_AVAILABLE = False
@@ -514,12 +531,16 @@ self.class_names = [...]
 import yolov5_npu
 self.yolov5_npu = yolov5_npu
 self.npu_temp_path = "/tmp/yolo_input.jpg"
+```
+
 Изменение 5: Функция cv_detect_objects — использует NPU.
 
 ```
 
 ```python
 def cv_detect_objects(self, img):
+```
+
     overlay_buffer = np.zeros_like(img)
     cv2.putText(overlay_buffer, 'NPU YOLOv5s', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 ```
@@ -546,6 +567,8 @@ os_info.py
 
 ```python
 # Было:
+```
+
 temperature_str = os.popen('vcgencmd measure_temp').readline()
 
 # Стало:
@@ -557,6 +580,8 @@ with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
 
 ```python
 # get_wifi_mode
+```
+
 result = subprocess.check_output(['/usr/sbin/iw', 'dev', 'wlan0', 'info'],
                                  encoding='utf-8',
                                  stderr=subprocess.DEVNULL)
@@ -581,6 +606,8 @@ templates/index.html
 Решение: Заменить на onclick="sendCmdObjs();".
 
 ```html
+```
+
 <div><button onclick="sendCmdObjs();" class="ctl_btn">OBJECTS</button></div>
 <div><button onclick="sendCmdClor();" class="ctl_btn">COLOR</button></div>
 <div><button onclick="sendCmdHand();" class="ctl_btn">HAND GS</button></div>
@@ -590,6 +617,8 @@ templates/control.js
 ```
 
 ```javascript
+```
+
 function sendCmdObjs() {
     sendCommand('base -c {"T":' + cv_objs + '}');
 }
@@ -622,6 +651,8 @@ function sendCommand(command) {
 Исправлена speedCtrl:
 
 ```javascript
+```
+
 function speedCtrl(inputSpd){
     speed_rate = inputSpd;
     defaultSpeed = speed_rate;
@@ -642,12 +673,16 @@ function speedCtrl(inputSpd){
 ```
 
 ```html
+```
+
 <script src="./control.js?v=2"></script>
 Важно: Параметр ?v=2 нужен, чтобы браузер не кэшировал старую версию.
 ```
 
 templates/style.css
 ```css
+```
+
 .video img{
     width: 960px;
     height: 540px;
@@ -662,6 +697,8 @@ templates/style.css
 ```ini
 [Unit]
 Description=UGV Robot App
+```
+
 After=network.target
 ```
 
@@ -719,6 +756,8 @@ CV-команды (детекция)
 Формат отправки (через base_ctrl.py)
 ```python
 # В app.py (обработчик /send_command)
+```
+
 cmdline_ctrl('base -c {"T":10304}')
 ```
 
@@ -762,6 +801,8 @@ fswebcam -d /dev/video0 --no-banner -r 1920x1080 -S 5 ./test.jpg
 def usb_camera_detection(self):
     import glob
     # 1. Быстрая проверка: есть ли /dev/video*
+```
+
     video_devices = glob.glob('/dev/video*')
     if not video_devices:
         print("USB Camera not connected (no /dev/video*)")
@@ -793,6 +834,8 @@ def usb_camera_detection(self):
 ```python
 # В cv_ctrl.py (frame_process)
 if self.set_video_record_flag and not self.video_record_status_flag:
+```
+
     current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     video_filename = f'{self.video_path}video_{current_time}.mp4'
     h, w = input_frame.shape[:2]
@@ -833,6 +876,8 @@ YOLOv5s обнаруживает объекты (person, tv, chair и т.д.).
 
 ```python
 def handle_command():
+```
+
     command = request.form['command']
     print("Received command:", command)
     cvf.info_update("CMD:" + command, (0,255,255), 0.36)
@@ -865,6 +910,8 @@ def handle_command():
 Решение 1: Убрана проверка base_voltage:
 
 ```javascript
+```
+
 socket.on('update', function(data) {
     // Убрана проверка base_voltage — она блокировала OSD без ESP32
     try {
@@ -878,6 +925,8 @@ socket.on('update', function(data) {
 
 ```python
 # os_info.py — get_cpu_temperature
+```
+
 with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
     temperature_str = f.read().strip()
 temperature = float(temperature_str) / 1000.0
@@ -889,6 +938,8 @@ return round(temperature, 1)
 
 ```python
 # os_info.py — get_signal_strength
+```
+
 signal_strength = re.search(r"signal:\s*(-\d+)", output)
 if signal_strength:
     return int(signal_strength.group(1))
@@ -917,6 +968,8 @@ Videos: 2.76 MB
 
 ```python
 # app.py — update_data_websocket_single
+```
+
 f['fb'][f'base_voltage']:base.base_data['v'] if base.base_data else 0,
 📝 Обновления в CSS
 templates/style.css:
@@ -924,6 +977,8 @@ templates/style.css:
 ```
 
 ```css
+```
+
 .video img{
     width: 960px;
     height: 540px;

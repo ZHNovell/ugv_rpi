@@ -174,14 +174,11 @@ pip install --upgrade pip
 ```
 
 ### requirements.txt (Python 3.13):
-```
 
 ```text
 # Веб-сервер
 Flask==3.0.3
 Flask-SocketIO==5.3.6
-```
-
 Werkzeug==3.0.3
 Jinja2==3.1.4
 itsdangerous==2.2.0
@@ -215,24 +212,20 @@ imageio==2.38.0
 pygame-ce==2.5.8
 pyttsx3==2.99
 netifaces==0.11.0
-Установка:
 ```
+
+**Установка:**
 
 ```bash
 pip install -r requirements.txt
 pip install imageio pygame-ce pyttsx3 netifaces
 ```
 
-Ключевые моменты:
-```
-
-Pillow 11.3.0 (не 10.3.0 — та не работает с Python 3.13).
-
-pygame-ce (не pygame — у pygame нет wheel для Python 3.13 + ARM64).
-
-av 17.1.0 (не 12.3.0 — та не работает).
-
-aiortc 1.15.0 (не 1.8.0).
+**Ключевые моменты:**
+- **Pillow 11.3.0** (не 10.3.0 — та не работает с Python 3.13).
+- **pygame-ce** (не pygame — у pygame нет wheel для Python 3.13 + ARM64).
+- **av 17.1.0** (не 12.3.0 — та не работает).
+- **aiortc 1.15.0** (не 1.8.0).
 
 🧠 NPU: Установка и настройка
 Драйвер NPU (уже в ядре)

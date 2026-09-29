@@ -47,7 +47,7 @@ class OpencvFuncs():
         self.base_ctrl = base_ctrl
         self.cv_event = threading.Event()
         self.cv_event.clear()
-        self.cv_mode = f['code']['cv_none']
+        self.cv_mode = f['code'][f'cv_none']
         self.detection_reaction_mode = f['code']['re_none']
         
         self.this_path = project_path

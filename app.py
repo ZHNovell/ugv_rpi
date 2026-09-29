@@ -420,6 +420,19 @@ def handle_command():
     command = request.form['command']
     print("Received command:", command)
     cvf.info_update("CMD:" + command, (0,255,255), 0.36)
+    
+    # Локально устанавливаем CV-режим (для NPU без ESP32)
+    try:
+        if command.startswith('base -c '):
+            import json
+            cmd_json = json.loads(command[8:])  # "base -c " = 8 символов
+            t_value = cmd_json.get('T')
+            if t_value in cmd_actions:
+                cmd_actions[t_value]()
+                print(f"[handle_command] Local cmd_action executed for T={t_value}")
+    except Exception as e:
+        print(f"[handle_command] Local cmd_action error: {e}")
+    
     try:
         cmdline_ctrl(command)
     except Exception as e:

@@ -19,3 +19,13 @@ ugv-env/
 
 # Результаты тестов
 output_yolov5.png
+
+# Бэкапы
+*.bak8
+*.bak9
+*.bak10
+*.bak11
+
+# Медиа (фото/видео)
+templates/pictures/
+templates/videos/

@@ -289,20 +289,28 @@ class OpencvFuncs():
             except:
                 pass
 
-        # record video
+        # record video (cv2.VideoWriter — надёжнее, чем imageio)
         if not self.set_video_record_flag and not self.video_record_status_flag:
             pass
         elif self.set_video_record_flag and not self.video_record_status_flag:
             current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             video_filename = f'{self.video_path}video_{current_time}.mp4'
-            self.writer = imageio.get_writer(video_filename, fps=30)
+            h, w = input_frame.shape[:2]
+            self.writer = cv2.VideoWriter(
+                video_filename,
+                cv2.VideoWriter_fourcc(*'mp4v'),
+                30,
+                (w, h)
+            )
             self.video_record_status_flag = True
         elif self.set_video_record_flag and self.video_record_status_flag:
             cv2.circle(input_frame, (15, 15), 5, (64, 64, 255), -1)
-            self.writer.append_data(np.array(cv2.cvtColor(input_frame, cv2.COLOR_BGRA2RGB)))
+            # Конвертируем BGRA → BGR (3 канала)
+            frame_to_write = cv2.cvtColor(input_frame, cv2.COLOR_BGRA2BGR)
+            self.writer.write(frame_to_write)
         elif not self.set_video_record_flag and self.video_record_status_flag:
             self.video_record_status_flag = False
-            self.writer.close()
+            self.writer.release()
 
         # frame scale
         if self.scale_rate == 1:
@@ -337,13 +345,28 @@ class OpencvFuncs():
 
 
     def usb_camera_detection(self):
-        lsusb_output = subprocess.check_output(["lsusb"]).decode("utf-8")
-        if "Camera" in lsusb_output:
-            print("USB Camera connected")
-            return True
-        else:
-            print("USB Camera not connected")
+        import glob
+        # 1. Быстрая проверка: есть ли /dev/video*
+        video_devices = glob.glob('/dev/video*')
+        if not video_devices:
+            print("USB Camera not connected (no /dev/video*)")
             return False
+        
+        # 2. Надёжная проверка: пробуем открыть через OpenCV
+        try:
+            cap = cv2.VideoCapture(0)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                cap.release()
+                if ret and frame is not None:
+                    print(f"USB Camera connected: {video_devices}, frame: {frame.shape}")
+                    return True
+            cap.release()
+        except Exception as e:
+            print(f"USB Camera detection error: {e}")
+        
+        print("USB Camera not connected (OpenCV failed)")
+        return False
 
 
     def osd_render(self, osd_frame):

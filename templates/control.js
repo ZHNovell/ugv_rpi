@@ -593,11 +593,7 @@ socket.emit('request_data');
 var light_mode = 0;
 var cv_heartbeat_stop_flag = false;
 socket.on('update', function(data) {
-    if (data[base_voltage] != 0) {
-        // console.log(data[detect_react]);
-    } else {
-        return;
-    }
+    // Убрана проверка base_voltage — она блокировала OSD без ESP32
     try {
         var baseBtn = document.getElementById("base_led_ctrl_btn");
         var BButtons = baseBtn.getElementsByTagName("button");

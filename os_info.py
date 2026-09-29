@@ -48,11 +48,12 @@ class SystemInfo(threading.Thread):
 
     def get_cpu_temperature(self):
         try:
-            # Orange Pi: читаем температуру из sysfs
+            # Orange Pi: читаем температуру из sysfs (millidegrees)
             with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
-                temperature_str = f.read()
-            temperature = float(temperature_str.replace("temp=", "").replace("'C\n", ""))
-            return temperature
+                temperature_str = f.read().strip()
+            # sysfs отдаёт millidegrees (24242 = 24.242 °C)
+            temperature = float(temperature_str) / 1000.0
+            return round(temperature, 1)
         except Exception as e:
             print("Error reading CPU temperature:", str(e))
             return None
@@ -89,7 +90,8 @@ class SystemInfo(threading.Thread):
             output = subprocess.check_output(["/usr/sbin/iw", "dev", interface, "link"],
                                              encoding="utf-8",
                                              stderr=subprocess.DEVNULL)
-            signal_strength = re.search(r"Signal level=(-\d+)", output)
+            # iw dev wlan0 link → "signal: -59 dBm"
+            signal_strength = re.search(r"signal:\s*(-\d+)", output)
             if signal_strength:
                 return int(signal_strength.group(1))
             return 0

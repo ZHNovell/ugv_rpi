@@ -705,6 +705,140 @@ cmdline_ctrl('base -c {"T":10304}')
 10. Демо YOLOv5s выводит результат в stderr, не stdout
 Решение: В yolov5_npu.py парсим result.stderr.
 
+
+## 🆕 Обновления (2026-09-29)
+
+### 📷 USB-камера (Logitech C920 HD Pro)
+
+**Подключение:**
+- Камера подключена в USB 2.0 порт Orange Pi 4 Pro.
+- Определяется как `/dev/video0` и `/dev/video1`.
+- Модуль `uvcvideo` загружается автоматически.
+
+**Проверка:**
+```bash
+# Список устройств
+v4l2-ctl --list-devices
+# HD Pro Webcam C920 (usb-sunxi-ehci-1.1):
+#         /dev/video0
+#         /dev/video1
+
+# Поддерживаемые форматы
+v4l2-ctl -d /dev/video0 --list-formats-ext
+# YUYV (4:2:2): до 1920x1080 @ 5 FPS
+# MJPG (Motion-JPEG): до 1920x1080 @ 30 FPS
+
+# Тест захвата кадра
+fswebcam -d /dev/video0 --no-banner -r 1920x1080 -S 5 ./test.jpg
+
+def usb_camera_detection(self):
+    import glob
+    # 1. Быстрая проверка: есть ли /dev/video*
+    video_devices = glob.glob('/dev/video*')
+    if not video_devices:
+        print("USB Camera not connected (no /dev/video*)")
+        return False
+    
+    # 2. Надёжная проверка: пробуем открыть через OpenCV
+    try:
+        cap = cv2.VideoCapture(0)
+        if cap.isOpened():
+            ret, frame = cap.read()
+            cap.release()
+            if ret and frame is not None:
+                print(f"USB Camera connected: {video_devices}, frame: {frame.shape}")
+                return True
+        cap.release()
+    except Exception as e:
+        print(f"USB Camera detection error: {e}")
+    
+    print("USB Camera not connected (OpenCV failed)")
+    return False
+
+
+Преимущества: работает для любой UVC-камеры, независимо от имени в lsusb.
+
+🎥 Запись видео
+Проблема: imageio с libx264 не работает (ошибки quality, broadcast).
+
+Решение: cv2.VideoWriter с кодеком mp4v
+
+
+# В cv_ctrl.py (frame_process)
+if self.set_video_record_flag and not self.video_record_status_flag:
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    video_filename = f'{self.video_path}video_{current_time}.mp4'
+    h, w = input_frame.shape[:2]
+    self.writer = cv2.VideoWriter(
+        video_filename,
+        cv2.VideoWriter_fourcc(*'mp4v'),
+        30,
+        (w, h)
+    )
+    self.video_record_status_flag = True
+elif self.set_video_record_flag and self.video_record_status_flag:
+    cv2.circle(input_frame, (15, 15), 5, (64, 64, 255), -1)
+    frame_to_write = cv2.cvtColor(input_frame, cv2.COLOR_BGRA2BGR)
+    self.writer.write(frame_to_write)
+elif not self.set_video_record_flag and self.video_record_status_flag:
+    self.video_record_status_flag = False
+    self.writer.release()
+
+
+Важно: mp4v (MPEG-4 Part 2) не воспроизводится в браузерах. Для H.264 нужен VPU (CedarC), которого нет в vendor-сборке. Решение: пересобрать Armbian с PR #10835.
+
+🧠 NPU YOLOv5s на видео
+Результат: 39 FPS, bounding boxes в реальном времени.
+
+Что работает:
+
+YOLOv5s обнаруживает объекты (person, tv, chair и т.д.).
+
+Отображает bounding boxes с уверенностью.
+
+Работает на видео с USB-камеры.
+
+Скорость: ~25 мс на кадр.
+
+🎛️ NPU по кнопке без ESP32
+Проблема: Кнопка OBJECTS отправляла {"T":10304} в UART, но без ESP32 — cv_mode не обновлялся, NPU не включался.
+
+Решение: Локальный cmd_action в handle_command (app.py):
+
+def handle_command():
+    command = request.form['command']
+    print("Received command:", command)
+    cvf.info_update("CMD:" + command, (0,255,255), 0.36)
+    
+    # Локально устанавливаем CV-режим (для NPU без ESP32)
+    try:
+        if command.startswith('base -c '):
+            import json
+            cmd_json = json.loads(command[8:])  # "base -c " = 8 символов
+            t_value = cmd_json.get('T')
+            if t_value in cmd_actions:
+                cmd_actions[t_value]()
+                print(f"[handle_command] Local cmd_action executed for T={t_value}")
+    except Exception as e:
+        print(f"[handle_command] Local cmd_action error: {e}")
+    
+    try:
+        cmdline_ctrl(command)
+    except Exception as e:
+        print(f"[app.handle_command] error: {e}")
+    return jsonify({"status": "success", "message": "Command received"})
+
+
+🚧 Что осталось
+□ H.264 — аппаратная запись видео (нужен VPU, пересборка Armbian).
+□ CSI-камера — вторая камера (обзорная, на PT).
+□ GPU — ускорение OpenCV (пересборка Armbian).
+□ Переключатель камер — USB / CSI в веб-интерфейсе.
+□ ArUco-маркеры — логика парковки.
+□ ESP32 (ИК, сонары) — код для прошивки.
+□ Пересборка Armbian с PR #10835 — GPU, VPU, H.264, CSI.
+
+
 Долгосрочное
 □ MediaPipe на NPU — если получится портировать.
 □ YOLOv8 — более точная модель.
@@ -726,6 +860,15 @@ ugv_base_general (GitHub): https://github.com/waveshareteam/ugv_base_general
 Armbian PR #10712 (A733): https://github.com/armbian/build/pull/10712
 
 Allwinner Model Zoo: https://dl.radxa.com/cubie/allwinner-model-zoo.tar.gz
+
+PR #10835 (GPU/VPU): https://github.com/armbian/build/pull/10835
+
+Ветка ijiki16: https://github.com/ijiki16/build/tree/sun60iw2-4pro-gpu-desktop-upstream
+
+JSON-команды (Waveshare): https://www.waveshare.com/wiki/08_Slave_Device_JSON_Instruction_Set
+
+Jetson-документация: https://www.waveshare.com/wiki/Jetson_03_Pan-Tilt_Control_and_LED_Light_Control
+
 
 👥 Авторы
 ZHNovell — адаптация под Orange Pi 4 Pro, NPU, веб-интерфейс.

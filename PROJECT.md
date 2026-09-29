@@ -259,7 +259,7 @@ Userspace NPU (перенос из edge-образа)
 /usr/lib/aarch64-linux-gnu/libNBGlinker.so — линкер.
 
 /etc/npu/ — модели (lenet, vpm_run).
-
+```
 Установка:
 
 ```bash

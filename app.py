@@ -500,7 +500,7 @@ def update_data_websocket_single():
             f['fb']['detect_react']:cvf.detection_reaction_mode,
             f['fb']['pan_angle']:   cvf.pan_angle,
             f['fb']['tilt_angle']:  cvf.tilt_angle,
-            f['fb']['base_voltage']:base.base_data['v'],
+            f['fb'][f'base_voltage']:base.base_data['v'] if base.base_data else 0,
             f['fb']['video_fps']:   cvf.video_fps,
             f['fb']['cv_movtion_mode']: cvf.cv_movtion_lock,
             f['fb']['base_light']:  base.base_light_status

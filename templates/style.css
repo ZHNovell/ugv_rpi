@@ -60,9 +60,34 @@ main {
     overflow: hidden;
 }
 .video img{
-    width: 640px;
-    height: 480px;
+    width: 960px;
+    height: 540px;
     border-radius: 4px;
+    object-fit: contain;
+}
+.video img{
+    width: 960px;
+    height: 540px;
+    border-radius: 4px;
+    object-fit: contain;
+}
+.video img{
+    width: 960px;
+    height: 540px;
+    border-radius: 4px;
+    object-fit: contain;
+}
+.video img{
+    width: 960px;
+    height: 540px;
+    border-radius: 4px;
+    object-fit: contain;
+}
+.video img{
+    width: 960px;
+    height: 540px;
+    border-radius: 4px;
+    object-fit: contain;
 }
 .feed{
     color: #4FF5C0;

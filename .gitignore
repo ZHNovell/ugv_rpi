@@ -25,6 +25,7 @@ output_yolov5.png
 *.bak9
 *.bak10
 *.bak11
+*.bak12
 
 # Медиа (фото/видео)
 templates/pictures/

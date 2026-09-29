@@ -172,8 +172,11 @@ class OpencvFuncs():
         # usb camera init
         if self.usb_camera_connected:
             self.camera = cv2.VideoCapture(0)
+            # Указываем MJPG для высокого FPS при высоком разрешении
+            self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
             self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, f['video']['default_res_w'])
             self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, f['video']['default_res_h'])
+            self.camera.set(cv2.CAP_PROP_FPS, 30)
 
         # csi camera init (only if picamera2 is available)
         if not self.usb_camera_connected and CSI_CAMERA_AVAILABLE:

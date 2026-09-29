@@ -55,10 +55,15 @@ git clone https://github.com/armbian/build.git
 cd armbian-build
 git fetch origin refs/pull/10712/head:pr-10712
 git checkout pr-10712
+```
 
+```bash
 ./compile.sh BOARD=orangepi4pro BRANCH=edge RELEASE=trixie \
+```
+
   BUILD_DESKTOP=no BUILD_MINIMAL=yes \
   KERNEL_CONFIGURE=no KERNEL_BTF=no KERNEL_GIT=shallow
+```
 
 Результат:
 
@@ -83,12 +88,18 @@ NPU: vipcore.ko (драйвер), libVIPhal.so, libNBGlinker.so (userspace).
 💾 Установка ОС
 Запись на SD-карту:
 
-bash
+```bash
+```
+
+```bash
 # На Ubuntu (VirtualBox)
+```
+
 unxz Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_edge_7.2.8_minimal.img.xz
 sudo dd if=Armbian-...-minimal.img of=/dev/sdX bs=4M status=progress
 sync
 Первый запуск:
+```
 
 Вставить SD-карту в Orange Pi 4 Pro.
 
@@ -102,16 +113,22 @@ sync
 
 Перенос на eMMC:
 
-bash
+```bash
+```
+
+```bash
 # На Orange Pi
 armbian-install
 # Выбрать eMMC, следовать инструкциям
 # После завершения — выключить, вытащить SD, загрузиться с eMMC
+```
+
 Важно: eMMC-модуль (32 ГБ) подключается в штатный разъём платы.
+```
 
 ⚙️ Настройка интерфейсов
 UART7 (пины 8/10)
-bash
+```bash
 # Активация через armbian-config
 sudo armbian-config
 # System → Kernel → Manage device tree overlays
@@ -119,40 +136,59 @@ sudo armbian-config
 # Сохранить, выйти, перезагрузиться
 
 # Проверка
+```
+
+```bash
 ls -la /dev/ttyS7
 # Должно быть: crw-rw---- 1 root dialout 241, 7 ... /dev/ttyS7
+```
 
 # Loopback-тест (замкнуть пины 8 и 10)
+```bash
 picocom -b 115200 /dev/ttyS7
 # Печатать символы → должны эхо-возвращаться
 # Выход: Ctrl+A, Ctrl+Q
+```
+
 I2C2 (пины 19/23)
-bash
+```bash
 # Активация через armbian-config
 sudo armbian-config
 # System → Kernel → Manage device tree overlays
 # Включить: i2c2
 # Сохранить, выйти, перезагрузиться
+```
 
 # Проверка
+```bash
 ls -la /dev/i2c-2
 # Должно быть: crw------- 1 root root 89, 2 ... /dev/i2c-2
+```
 
 # Сканирование шины
+```bash
 apt install -y i2c-tools
 i2cdetect -y 2
 # Должно быть пусто (если ничего не подключено)
+```
+
 armbianEnv.txt (после активации):
+```
 
 text
 overlays=i2c2 uart7
 📦 Установка зависимостей
 Системные пакеты
-bash
+```bash
+```
+
+```bash
 sudo apt update
 sudo apt install -y \
     git python3-pip python3-venv python3-dev \
     cmake build-essential \
+```
+
     i2c-tools picocom \
     unzip espeak-ng libespeak1 \
     libopenblas-dev liblapack-dev libhdf5-dev \
@@ -165,12 +201,15 @@ sudo apt install -y \
     libgstreamer-plugins-base1.0-dev \
     libgstreamer-plugins-bad1.0-dev
 Python-зависимости (venv)
-bash
+```bash
 cd ~/ugv_rpi
 python3 -m venv ugv-env
 source ugv-env/bin/activate
 pip install --upgrade pip
+```
+
 requirements.txt (Python 3.13):
+```
 
 text
 # Веб-сервер
@@ -211,10 +250,16 @@ pyttsx3==2.99
 netifaces==0.11.0
 Установка:
 
-bash
+```bash
+```
+
+```bash
 pip install -r requirements.txt
 pip install imageio pygame-ce pyttsx3 netifaces
+```
+
 Ключевые моменты:
+```
 
 Pillow 11.3.0 (не 10.3.0 — та не работает с Python 3.13).
 
@@ -226,18 +271,28 @@ aiortc 1.15.0 (не 1.8.0).
 
 🧠 NPU: Установка и настройка
 Драйвер NPU (уже в ядре)
-bash
+```bash
+```
+
+```bash
 ls -la /dev/vipcore
 # crw-rw-rw- 1 root root 199, 0 ... /dev/vipcore
+```
 
+```bash
 lsmod | grep vipcore
 # vipcore 270336 0
+```
 
+```bash
 dmesg | grep -i vipcore
 # npu[152][152] vipcore, platform driver init
 # npu[152][152] vipcore, device_cnt=1, core_cnt=1
+```
+
 Userspace NPU (перенос из edge-образа)
 Из edge-образа скопированы:
+```
 
 /usr/bin/lenet — утилита тестирования LeNet.
 
@@ -251,57 +306,89 @@ Userspace NPU (перенос из edge-образа)
 
 Установка:
 
-bash
+```bash
+```
+
+```bash
 cp ~/npu-files/lenet /usr/bin/
 cp ~/npu-files/vpm_run /usr/bin/
 chmod +x /usr/bin/lenet /usr/bin/vpm_run
+```
 
+```bash
 cp ~/npu-files/libVIPhal.so /usr/lib/aarch64-linux-gnu/
 cp ~/npu-files/libNBGlinker.so /usr/lib/aarch64-linux-gnu/
+```
 
+```bash
 mkdir -p /etc/npu
 cp -r ~/npu-files/npu/lenet /etc/npu/
 cp -r ~/npu-files/npu/vpm_run /etc/npu/
+```
+
 Тест NPU
-bash
+```bash
+```
+
 lenet /etc/npu/lenet/model/lenet.nb /etc/npu/lenet/input_data/lenet.dat
 # Вывод: inference ~0.36 ms
+```
 
 cd /etc/npu/vpm_run
 vpm_run -s sample.txt -l 1 -d 0
 # Вывод: inference ~2979 us
 Model Zoo (YOLOv5s)
-bash
+```bash
+```
+
+```bash
 # На Ubuntu (VirtualBox)
 wget https://dl.radxa.com/cubie/allwinner-model-zoo.tar.gz
+```
+
 tar -xzf allwinner-model-zoo.tar.gz -C ~/awnpu-zoo/
+```
 
 # Скопировать на Orange Pi
+```bash
 scp -r ~/awnpu-zoo/awnpu_model_zoo-v0.9.0-*/examples/yolov5 root@<IP>:/root/npu-files/
 scp -r ~/awnpu-zoo/awnpu_model_zoo-v0.9.0-*/3rdparty root@<IP>:/root/npu-files/zoo/
 scp -r ~/awnpu-zoo/awnpu_model_zoo-v0.9.0-*/common root@<IP>:/root/npu-files/zoo/
 scp -r ~/awnpu-zoo/awnpu_model_zoo-v0.9.0-*/cmake_toolchain root@<IP>:/root/npu-files/zoo/
+```
+
 Сборка YOLOv5s демо
-bash
+```bash
 # На Orange Pi
 cd /root/npu-files/zoo/3rdparty/opencv/
 unzip opencv-4.9.0-aarch64-linux-sunxi-glibc.zip
+```
 
 cd /root/npu-files/zoo/examples/yolov5
+```bash
 mkdir -p build && cd build
+```
 
 # Правка CMakeLists.txt
+```bash
 sed -i 's|elseif(CMAKE_C_COMPILER MATCHES "aarch64")|elseif(TARGET_NAME STREQUAL "A733")|' ../CMakeLists.txt
+```
 
 # Сборка
+```bash
 cmake .. -DTARGET_NAME=A733 -DCMAKE_SYSTEM_NAME=Linux
 make -j4
+```
+
 Запуск YOLOv5s
-bash
+```bash
 cd /root/npu-files/zoo/examples/yolov5/build
 ./yolov5_demo_a733 -nb ../model/yolov5s_rt_uint8_a733.nb \
+```
+
                    -i ../model/dog.jpg -l 1 -m 10
 Результат:
+```
 
 text
 detection num: 3
@@ -327,7 +414,6 @@ import os
 DEMO_PATH = "/root/npu-files/zoo/examples/yolov5/build/yolov5_demo_a733"
 MODEL_PATH = "/root/npu-files/zoo/examples/yolov5/model/yolov5s_rt_uint8_a733.nb"
 LD_LIBRARY_PATH = "/root/npu-files/zoo/common/npuruntime/lib_linux_aarch64/A733"
-
 
 def detect(image_path):
     """
@@ -363,7 +449,6 @@ def detect(image_path):
 
     return detections
 
-
 if __name__ == '__main__':
     image = "/root/npu-files/zoo/examples/yolov5/model/dog.jpg"
     print(f"Testing on {image}...")
@@ -384,10 +469,16 @@ base = BaseController('/dev/ttyAMA0', 115200)
 base = BaseController('/dev/ttyS7', 115200)
 Команда замены:
 
-bash
+```bash
+```
+
+```bash
 sed -i "s|/dev/ttyAMA0|/dev/ttyS7|g" base_ctrl.py
+```
+
 app.py
 Изменение 1: UART-порт + удаление блока проверки Raspberry Pi.
+```
 
 python
 # Было:
@@ -410,10 +501,16 @@ else:
 base = BaseController('/dev/ttyS7', 115200)
 Изменение 2: eth0_ip → end0_ip.
 
-bash
+```bash
+```
+
+```bash
 sed -i 's/si\.eth0_ip/si.end0_ip/g' app.py
+```
+
 cv_ctrl.py
 Изменение 1: Оборачиваем импорты в try/except.
+```
 
 python
 try:
@@ -502,12 +599,18 @@ output = subprocess.check_output(["/usr/sbin/iw", "dev", interface, "link"],
                                  stderr=subprocess.DEVNULL)
 Изменение 3: eth0 → end0.
 
-bash
+```bash
+```
+
+```bash
 sed -i 's/'"'"'eth0'"'"'/'"'"'end0'"'"'/g' os_info.py
 sed -i 's/self\.eth0_ip/self.end0_ip/g' os_info.py
+```
+
 🌐 Веб-интерфейс
 templates/index.html
 Проблема: Кнопки OBJECTS, COLOR, HAND GS использовали onclick="cmdSend(cv_objs,0,0);", который отправлял {A,B,C} через WebSocket (требует ESP32).
+```
 
 Решение: Заменить на onclick="sendCmdObjs();".
 
@@ -599,15 +702,22 @@ RestartSec=5
 WantedBy=multi-user.target
 Активация:
 
-bash
+```bash
 sudo systemctl daemon-reload
 sudo systemctl enable ugv.service
 sudo systemctl start ugv.service
 sudo systemctl status ugv.service
+```
+
 Логи:
 
-bash
+```bash
+```
+
+```bash
 journalctl -u ugv.service -f
+```
+
 📡 JSON-команды (ESP32)
 Команды управления (через UART7)
 Команда	JSON	Описание
@@ -636,6 +746,7 @@ MP Pose	10309	MediaPipe Pose
 python
 # В app.py (обработчик /send_command)
 cmdline_ctrl('base -c {"T":10304}')
+```
 
 # cmdline_ctrl парсит:
 # args = ['base', '-c', '{"T":10304}']
@@ -653,8 +764,10 @@ cmdline_ctrl('base -c {"T":10304}')
 
 Проверка:
 
-bash
+```bash
 # Список устройств
+```
+
 v4l2-ctl --list-devices
 # HD Pro Webcam C920 (usb-sunxi-ehci-1.1):
 #         /dev/video0

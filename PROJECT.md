@@ -70,30 +70,25 @@ git checkout pr-10712
 
 **Важно:** Vendor-сборка (6.6.98) **не содержит** NPU-утилит. Edge-сборка (7.2.8) **содержит** их.
 
-💾 Установка ОС
-Запись на SD-карту:
+## 💾 Установка ОС
+
+**Запись на SD-карту:**
 
 ```bash
 # На Ubuntu (VirtualBox)
-```
-
 unxz Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_edge_7.2.8_minimal.img.xz
 sudo dd if=Armbian-...-minimal.img of=/dev/sdX bs=4M status=progress
 sync
 ```
-Первый запуск:
 
-Вставить SD-карту в Orange Pi 4 Pro.
+**Первый запуск:**
+1. Вставить SD-карту в Orange Pi 4 Pro.
+2. Подключить Ethernet + HDMI.
+3. Загрузиться.
+4. Пройти `armbian-firstlogin` (через HDMI + клавиатуру).
+5. Сменить пароль root, создать пользователя.
 
-Подключить Ethernet + HDMI.
-
-Загрузиться.
-
-Пройти armbian-firstlogin (через HDMI + клавиатуру).
-
-Сменить пароль root, создать пользователя.
-
-Перенос на eMMC:
+**Перенос на eMMC:**
 
 ```bash
 # На Orange Pi
@@ -102,7 +97,7 @@ armbian-install
 # После завершения — выключить, вытащить SD, загрузиться с eMMC
 ```
 
-Важно: eMMC-модуль (32 ГБ) подключается в штатный разъём платы.
+**Важно:** eMMC-модуль (32 ГБ) подключается в штатный разъём платы.
 ## ⚙️ Настройка интерфейсов
 ### UART7 (пины 8/10)
 ```bash

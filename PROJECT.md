@@ -831,6 +831,173 @@ def handle_command():
     return jsonify({"status": "success", "message": "Command received"})
 
 
+## 🆕 Обновления (2026-09-29 — часть 2)
+
+### 🎥 USB-камера и видео
+
+**Камера:** Logitech C920 HD Pro Webcam (USB 2.0).
+
+**Разрешение:** 1920x1080 (16:9), **MJPG**, **30 FPS**.
+
+**Ключевые изменения:**
+```python
+# cv_ctrl.py — init
+self.camera = cv2.VideoCapture(0)
+self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+self.camera.set(cv2.CAP_PROP_FPS, 30)
+
+Важно: Без MJPG OpenCV использует YUYV → 5 FPS при 1920x1080. С MJPG → 30 FPS.
+
+CSS (templates/style.css):
+
+css
+.video img{
+    width: 960px;
+    height: 540px;
+    border-radius: 4px;
+    object-fit: contain;  /* сохраняет 16:9 */
+}
+🎬 Запись видео (cv2.VideoWriter)
+Проблема: imageio с libx264 не работает (ошибки quality, broadcast).
+
+Решение: cv2.VideoWriter с кодеком mp4v:
+
+python
+# cv_ctrl.py — frame_process
+if self.set_video_record_flag and not self.video_record_status_flag:
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    video_filename = f'{self.video_path}video_{current_time}.mp4'
+    h, w = input_frame.shape[:2]
+    self.writer = cv2.VideoWriter(
+        video_filename,
+        cv2.VideoWriter_fourcc(*'mp4v'),
+        30,
+        (w, h)
+    )
+    self.video_record_status_flag = True
+elif self.set_video_record_flag and self.video_record_status_flag:
+    cv2.circle(input_frame, (15, 15), 5, (64, 64, 255), -1)
+    frame_to_write = cv2.cvtColor(input_frame, cv2.COLOR_BGRA2BGR)
+    self.writer.write(frame_to_write)
+elif not self.set_video_record_flag and self.video_record_status_flag:
+    self.video_record_status_flag = False
+    self.writer.release()
+Важно: mp4v (MPEG-4 Part 2) не воспроизводится в браузерах. Для H.264 нужен VPU (CedarC) — пересборка Armbian с PR #10835.
+
+🧠 NPU YOLOv5s на видео
+Результат: 39 FPS, bounding boxes в реальном времени.
+
+Что работает:
+
+YOLOv5s обнаруживает объекты (person, tv, chair и т.д.).
+
+Отображает bounding boxes с уверенностью.
+
+Работает на видео с USB-камеры.
+
+Скорость: ~25 мс на кадр.
+
+🎛️ NPU по кнопке без ESP32
+Проблема: Кнопка OBJECTS отправляла {"T":10304} в UART, но без ESP32 — cv_mode не обновлялся, NPU не включался.
+
+Решение: Локальный cmd_action в handle_command (app.py):
+
+python
+def handle_command():
+    command = request.form['command']
+    print("Received command:", command)
+    cvf.info_update("CMD:" + command, (0,255,255), 0.36)
+    
+    # Локально устанавливаем CV-режим (для NPU без ESP32)
+    try:
+        if command.startswith('base -c '):
+            import json
+            cmd_json = json.loads(command[8:])  # "base -c " = 8 символов
+            t_value = cmd_json.get('T')
+            if t_value in cmd_actions:
+                cmd_actions[t_value]()
+                print(f"[handle_command] Local cmd_action executed for T={t_value}")
+    except Exception as e:
+        print(f"[handle_command] Local cmd_action error: {e}")
+    
+    try:
+        cmdline_ctrl(command)
+    except Exception as e:
+        print(f"[app.handle_command] error: {e}")
+    return jsonify({"status": "success", "message": "Command received"})
+Результат: Кнопка OBJECTS локально включает NPU (без ESP32) и одновременно отправляет команду в UART (для ESP32).
+
+📊 OSD (On-Screen Display)
+Проблема: OSD не обновлялся — CPU: 0, RAM: 0, FPS: 0, TEMP: 0, RSSI: 0.
+
+Причина 1: В control.js была проверка if (data[base_voltage] != 0), которая блокировала обновление OSD без ESP32.
+
+Решение 1: Убрана проверка base_voltage:
+
+javascript
+socket.on('update', function(data) {
+    // Убрана проверка base_voltage — она блокировала OSD без ESP32
+    try {
+        ...
+    }
+});
+Причина 2: Температура в sysfs — millidegrees (24242 = 24.242 °C).
+
+Решение 2: Деление на 1000:
+
+python
+# os_info.py — get_cpu_temperature
+with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+    temperature_str = f.read().strip()
+temperature = float(temperature_str) / 1000.0
+return round(temperature, 1)
+Причина 3: RSSI — iw dev wlan0 link отдаёт signal: -59 dBm, а код искал Signal level=-59 (старый формат iwconfig).
+
+Решение 3: Новое регулярное выражение:
+
+python
+# os_info.py — get_signal_strength
+signal_strength = re.search(r"signal:\s*(-\d+)", output)
+if signal_strength:
+    return int(signal_strength.group(1))
+return 0
+Результат: OSD полностью работает:
+
+CPU: 8.2%
+
+RAM: 3.7%
+
+FPS: 15.0
+
+TEMP: 23.7 °C
+
+RSSI: -59 dBm
+
+Photos: 0.45 MB
+
+Videos: 2.76 MB
+
+🐛 Убрана NoneType ошибка
+Проблема: base.base_data['v'] — base_data = None (ESP32 не подключён).
+
+Решение: base.base_data['v'] if base.base_data else 0:
+
+python
+# app.py — update_data_websocket_single
+f['fb'][f'base_voltage']:base.base_data['v'] if base.base_data else 0,
+📝 Обновления в CSS
+templates/style.css:
+
+css
+.video img{
+    width: 960px;
+    height: 540px;
+    border-radius: 4px;
+    object-fit: contain;
+}
+
 🚧 Что осталось
 □ H.264 — аппаратная запись видео (нужен VPU, пересборка Armbian).
 □ CSI-камера — вторая камера (обзорная, на PT).

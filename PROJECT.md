@@ -404,35 +404,33 @@ if __name__ == '__main__':
         print(f"  {det['class']}: {det['confidence']*100:.0f}% at {det['bbox']}")
 ```
 
-**Важно:** Демо выводит результат в **`stderr`**, а не в `stdout`! Поэтому парсим `result.stderr`.
-🔧 Адаптация кода ugv_rpi
-base_ctrl.py
-Изменение: UART-порт.
+## 🔧 Адаптация кода `ugv_rpi`
+
+### `base_ctrl.py`
+
+**Изменение:** UART-порт.
 
 ```python
 # Было (Raspberry Pi):
-```
-
 base = BaseController('/dev/ttyAMA0', 115200)
 
 # Стало (Orange Pi 4 Pro):
 base = BaseController('/dev/ttyS7', 115200)
-Команда замены:
 ```
+
+**Команда замены:**
 
 ```bash
 sed -i "s|/dev/ttyAMA0|/dev/ttyS7|g" base_ctrl.py
 ```
 
-app.py
-Изменение 1: UART-порт + удаление блока проверки Raspberry Pi.
-```
+### `app.py`
+
+**Изменение 1:** UART-порт + удаление блока проверки Raspberry Pi.
 
 ```python
 # Было:
 def is_raspberry_pi5():
-```
-
     with open('/proc/cpuinfo', 'r') as file:
         for line in file:
             if 'Model' in line:
@@ -440,7 +438,6 @@ def is_raspberry_pi5():
                     return True
                 else:
                     return False
-```
 
 if is_raspberry_pi5():
     base = BaseController('/dev/ttyAMA0', 115200)
@@ -450,27 +447,26 @@ else:
 # Стало:
 # Orange Pi 4 Pro — UART7
 base = BaseController('/dev/ttyS7', 115200)
-Изменение 2: eth0_ip → end0_ip.
+```
+
+**Изменение 2:** `eth0_ip` → `end0_ip`.
 
 ```bash
 sed -i 's/si\.eth0_ip/si.end0_ip/g' app.py
 ```
 
-cv_ctrl.py
-Изменение 1: Оборачиваем импорты в try/except.
-```
+### `cv_ctrl.py`
+
+**Изменение 1:** Оборачиваем импорты в `try/except`.
 
 ```python
 try:
     import mediapipe as mp
-```
-
     MEDIAPIPE_AVAILABLE = True
 except ImportError:
     MEDIAPIPE_AVAILABLE = False
     print("mediapipe not available — face/hand/pose detection disabled")
     mp = None
-```
 
 try:
     from picamera2 import Picamera2
@@ -487,11 +483,13 @@ try:
 except ImportError:
     OAK_CAMERA_AVAILABLE = False
     print("depthai not available — OAK camera disabled")
-Изменение 2: Блоки mediapipe в __init__ — обёрнуты в if MEDIAPIPE_AVAILABLE:.
+```
 
-Изменение 3: Блоки CSI/OAK — добавлены проверки CSI_CAMERA_AVAILABLE, OAK_CAMERA_AVAILABLE.
+**Изменение 2:** Блоки `mediapipe` в `__init__` — обёрнуты в `if MEDIAPIPE_AVAILABLE:`.
 
-Изменение 4: Инициализация NPU (вместо cv2.dnn).
+**Изменение 3:** Блоки CSI/OAK — добавлены проверки `CSI_CAMERA_AVAILABLE`, `OAK_CAMERA_AVAILABLE`.
+
+**Изменение 4:** Инициализация NPU (вместо `cv2.dnn`).
 
 ```python
 # Было:
@@ -504,17 +502,12 @@ self.yolov5_npu = yolov5_npu
 self.npu_temp_path = "/tmp/yolo_input.jpg"
 ```
 
-Изменение 5: Функция cv_detect_objects — использует NPU.
-
-```
+**Изменение 5:** Функция `cv_detect_objects` — использует NPU.
 
 ```python
 def cv_detect_objects(self, img):
-```
-
     overlay_buffer = np.zeros_like(img)
     cv2.putText(overlay_buffer, 'NPU YOLOv5s', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-```
 
     cv2.imwrite(self.npu_temp_path, img)
 
@@ -533,26 +526,25 @@ def cv_detect_objects(self, img):
         cv2.putText(overlay_buffer, label, (x0, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
     self.overlay = overlay_buffer
-os_info.py
-Изменение 1: vcgencmd → sysfs.
+```
+
+### `os_info.py`
+
+**Изменение 1:** `vcgencmd` → `sysfs`.
 
 ```python
 # Было:
-```
-
 temperature_str = os.popen('vcgencmd measure_temp').readline()
 
 # Стало:
 with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
     temperature_str = f.read()
-Изменение 2: iwconfig → iw.
-
 ```
+
+**Изменение 2:** `iwconfig` → `iw`.
 
 ```python
 # get_wifi_mode
-```
-
 result = subprocess.check_output(['/usr/sbin/iw', 'dev', 'wlan0', 'info'],
                                  encoding='utf-8',
                                  stderr=subprocess.DEVNULL)
@@ -561,8 +553,9 @@ result = subprocess.check_output(['/usr/sbin/iw', 'dev', 'wlan0', 'info'],
 output = subprocess.check_output(["/usr/sbin/iw", "dev", interface, "link"],
                                  encoding="utf-8",
                                  stderr=subprocess.DEVNULL)
-Изменение 3: eth0 → end0.
 ```
+
+**Изменение 3:** `eth0` → `end0`.
 
 ```bash
 sed -i 's/'"'"'eth0'"'"'/'"'"'end0'"'"'/g' os_info.py

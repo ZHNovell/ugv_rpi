@@ -284,10 +284,11 @@ cp -r ~/npu-files/npu/vpm_run /etc/npu/
 lenet /etc/npu/lenet/model/lenet.nb /etc/npu/lenet/input_data/lenet.dat
 ```
 # Вывод: inference ~0.36 ms
-```
 
+```bash
 cd /etc/npu/vpm_run
 vpm_run -s sample.txt -l 1 -d 0
+```
 # Вывод: inference ~2979 us
 Model Zoo (YOLOv5s)
 
@@ -329,11 +330,10 @@ make -j4
 ```bash
 cd /root/npu-files/zoo/examples/yolov5/build
 ./yolov5_demo_a733 -nb ../model/yolov5s_rt_uint8_a733.nb \
+-i ../model/dog.jpg -l 1 -m 10
 ```
-
-                   -i ../model/dog.jpg -l 1 -m 10
 Результат:
-```bash
+```text
 detection num: 3
 16:  91%, [ 135,  221,  311,  535], dog
  2:  67%, [ 470,   74,  688,  173], car
@@ -341,26 +341,25 @@ detection num: 3
 Скорость: ~25 мс на кадр (~39 FPS).
 ```
 
-🐍 Python-обёртка для NPU (yolov5_npu.py)
-Файл: ~/ugv_rpi/yolov5_npu.py
+## 🐍 Python-обёртка для NPU (`yolov5_npu.py`)
 
-Назначение: Вызов YOLOv5s на NPU из Python через subprocess.
+**Файл:** `~/ugv_rpi/yolov5_npu.py`
+
+**Назначение:** Вызов YOLOv5s на NPU из Python через `subprocess`.
 
 ```python
 """
-```
-
 Python-обёртка для YOLOv5s на NPU через subprocess.
 Вызывает yolov5_demo_a733 и парсит результат.
 """
 import subprocess
 import re
 import os
-```
 
 DEMO_PATH = "/root/npu-files/zoo/examples/yolov5/build/yolov5_demo_a733"
 MODEL_PATH = "/root/npu-files/zoo/examples/yolov5/model/yolov5s_rt_uint8_a733.nb"
 LD_LIBRARY_PATH = "/root/npu-files/zoo/common/npuruntime/lib_linux_aarch64/A733"
+
 
 def detect(image_path):
     """
@@ -396,14 +395,16 @@ def detect(image_path):
 
     return detections
 
+
 if __name__ == '__main__':
     image = "/root/npu-files/zoo/examples/yolov5/model/dog.jpg"
     print(f"Testing on {image}...")
     detections = detect(image)
     for det in detections:
         print(f"  {det['class']}: {det['confidence']*100:.0f}% at {det['bbox']}")
-Важно: Демо выводит результат в stderr, а не в stdout! Поэтому парсим result.stderr.
+```
 
+**Важно:** Демо выводит результат в **`stderr`**, а не в `stdout`! Поэтому парсим `result.stderr`.
 🔧 Адаптация кода ugv_rpi
 base_ctrl.py
 Изменение: UART-порт.

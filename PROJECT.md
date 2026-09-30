@@ -280,8 +280,9 @@ cp -r ~/npu-files/npu/vpm_run /etc/npu/
 ```
 
 Тест NPU
-
+```bash
 lenet /etc/npu/lenet/model/lenet.nb /etc/npu/lenet/input_data/lenet.dat
+```
 # Вывод: inference ~0.36 ms
 ```
 

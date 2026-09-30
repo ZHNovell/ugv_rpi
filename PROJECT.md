@@ -293,8 +293,6 @@ Model Zoo (YOLOv5s)
 ```bash
 # На Ubuntu (VirtualBox)
 wget https://dl.radxa.com/cubie/allwinner-model-zoo.tar.gz
-```
-
 tar -xzf allwinner-model-zoo.tar.gz -C ~/awnpu-zoo/
 ```
 

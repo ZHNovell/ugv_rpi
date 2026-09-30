@@ -562,31 +562,28 @@ sed -i 's/'"'"'eth0'"'"'/'"'"'end0'"'"'/g' os_info.py
 sed -i 's/self\.eth0_ip/self.end0_ip/g' os_info.py
 ```
 
-🌐 Веб-интерфейс
-templates/index.html
-Проблема: Кнопки OBJECTS, COLOR, HAND GS использовали onclick="cmdSend(cv_objs,0,0);", который отправлял {A,B,C} через WebSocket (требует ESP32).
-```
+## 🌐 Веб-интерфейс
 
-Решение: Заменить на onclick="sendCmdObjs();".
+### `templates/index.html`
+
+**Проблема:** Кнопки `OBJECTS`, `COLOR`, `HAND GS` использовали `onclick="cmdSend(cv_objs,0,0);"`, который отправлял `{A,B,C}` через WebSocket (требует ESP32).
+
+**Решение:** Заменить на `onclick="sendCmdObjs();"`.
 
 ```html
-```
-
 <div><button onclick="sendCmdObjs();" class="ctl_btn">OBJECTS</button></div>
 <div><button onclick="sendCmdClor();" class="ctl_btn">COLOR</button></div>
 <div><button onclick="sendCmdHand();" class="ctl_btn">HAND GS</button></div>
-templates/control.js
-Добавлены функции:
-
 ```
+
+### `templates/control.js`
+
+**Добавлены функции:**
 
 ```javascript
-```
-
 function sendCmdObjs() {
     sendCommand('base -c {"T":' + cv_objs + '}');
 }
-```
 
 function sendCmdClor() {
     sendCommand('base -c {"T":' + cv_clor + '}');
@@ -612,11 +609,11 @@ function sendCommand(command) {
         console.error('Error:', error);
     });
 }
-Исправлена speedCtrl:
-
-```javascript
 ```
 
+**Исправлена `speedCtrl`:**
+
+```javascript
 function speedCtrl(inputSpd){
     speed_rate = inputSpd;
     defaultSpeed = speed_rate;
@@ -632,39 +629,35 @@ function speedCtrl(inputSpd){
     }
     sendCommand('base -c {"T":138,"L":' + speed_rate + ',"R":' + speed_rate + '}');
 }
-Версионирование control.js в index.html:
-
 ```
+
+**Версионирование `control.js` в `index.html`:**
 
 ```html
-```
-
 <script src="./control.js?v=2"></script>
-Важно: Параметр ?v=2 нужен, чтобы браузер не кэшировал старую версию.
 ```
 
-templates/style.css
+**Важно:** Параметр `?v=2` нужен, чтобы браузер **не кэшировал** старую версию.
+
+### `templates/style.css`
+
 ```css
-```
-
 .video img{
     width: 960px;
     height: 540px;
     border-radius: 4px;
     object-fit: contain;
 }
-🚀 Автозапуск app.py (systemd)
-Файл: /etc/systemd/system/ugv.service
-
 ```
+
+## 🚀 Автозапуск `app.py` (systemd)
+
+**Файл:** `/etc/systemd/system/ugv.service`
 
 ```ini
 [Unit]
 Description=UGV Robot App
-```
-
 After=network.target
-```
 
 [Service]
 Type=simple
@@ -676,7 +669,9 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-Активация:
+```
+
+**Активация:**
 
 ```bash
 sudo systemctl daemon-reload
@@ -685,27 +680,30 @@ sudo systemctl start ugv.service
 sudo systemctl status ugv.service
 ```
 
-Логи:
+**Логи:**
 
 ```bash
 journalctl -u ugv.service -f
 ```
+## 📡 JSON-команды (ESP32)
 
-📡 JSON-команды (ESP32)
-Команды управления (через UART7)
+### Команды управления (через UART7)
+
 | Команда | JSON | Описание |
 |---|---|---|
-| Движение | {"T":1,"L":0.5,"R":0.5} | L/R: -1.0 до 1.0 |
-| PWM напрямую | {"T":11,"L":164,"R":164} | L/R: -255 до 255 |
-| Скорость (rate) | {"T":138,"L":0.3,"R":0.3} | Масштаб скорости |
-| OLED | {"T":3,"lineNum":0,"Text":"..."} | Вывод текста |
-| Модуль | {"T":4,"cmd":0} | 0=Null, 1=RoArm, 2=PT |
-| PT сервы | {"T":133,"X":0,"Y":0,"SPD":0,"ACC":0} | Пан-тилт |
-| Свет | {"T":132,"IO4":255,"IO5":255} | IO4/IO5: 0-255 |
-| Телеметрия | {"T":130} | Запрос данных |
-| Поток телеметрии | {"T":131,"cmd":1} | Вкл/выкл |
-| Интервал телеметрии | {"T":142,"cmd":0} | мс |
-CV-команды (детекция)
+| Движение | `{"T":1,"L":0.5,"R":0.5}` | L/R: -1.0 до 1.0 |
+| PWM напрямую | `{"T":11,"L":164,"R":164}` | L/R: -255 до 255 |
+| Скорость (rate) | `{"T":138,"L":0.3,"R":0.3}` | Масштаб скорости |
+| OLED | `{"T":3,"lineNum":0,"Text":"..."}` | Вывод текста |
+| Модуль | `{"T":4,"cmd":0}` | 0=Null, 1=RoArm, 2=PT |
+| PT сервы | `{"T":133,"X":0,"Y":0,"SPD":0,"ACC":0}` | Пан-тилт |
+| Свет | `{"T":132,"IO4":255,"IO5":255}` | IO4/IO5: 0-255 |
+| Телеметрия | `{"T":130}` | Запрос данных |
+| Поток телеметрии | `{"T":131,"cmd":1}` | Вкл/выкл |
+| Интервал телеметрии | `{"T":142,"cmd":0}` | мс |
+
+### CV-команды (детекция)
+
 | Команда | T | Описание |
 |---|---|---|
 | None | 10301 | Отключить детекцию |
@@ -717,36 +715,32 @@ CV-команды (детекция)
 | Auto | 10307 | Авто-режим |
 | MP Face | 10308 | MediaPipe Face |
 | MP Pose | 10309 | MediaPipe Pose |
-Формат отправки (через base_ctrl.py)
+
+### Формат отправки (через `base_ctrl.py`)
+
 ```python
 # В app.py (обработчик /send_command)
-```
-
 cmdline_ctrl('base -c {"T":10304}')
-```
-
-```
 
 # cmdline_ctrl парсит:
 # args = ['base', '-c', '{"T":10304}']
 # base.base_json_ctrl(json.loads(args[2]))
 # → UART7: {"T":10304}\n
-🆕 Обновления (2026-09-29)
-📷 USB-камера (Logitech C920 HD Pro)
-Подключение:
+```
 
-Камера подключена в USB 2.0 порт Orange Pi 4 Pro.
+## 🆕 Обновления (2026-09-29)
 
-Определяется как /dev/video0 и /dev/video1.
+### 📷 USB-камера (Logitech C920 HD Pro)
 
-Модуль uvcvideo загружается автоматически.
+**Подключение:**
+- Камера подключена в USB 2.0 порт Orange Pi 4 Pro.
+- Определяется как `/dev/video0` и `/dev/video1`.
+- Модуль `uvcvideo` загружается автоматически.
 
-Проверка:
+**Проверка:**
 
 ```bash
 # Список устройств
-```
-
 v4l2-ctl --list-devices
 # HD Pro Webcam C920 (usb-sunxi-ehci-1.1):
 #         /dev/video0
@@ -759,14 +753,14 @@ v4l2-ctl -d /dev/video0 --list-formats-ext
 
 # Тест захвата кадра
 fswebcam -d /dev/video0 --no-banner -r 1920x1080 -S 5 ./test.jpg
-Универсальная детекция в cv_ctrl.py:
+```
+
+**Универсальная детекция в `cv_ctrl.py`:**
 
 ```python
 def usb_camera_detection(self):
     import glob
     # 1. Быстрая проверка: есть ли /dev/video*
-```
-
     video_devices = glob.glob('/dev/video*')
     if not video_devices:
         print("USB Camera not connected (no /dev/video*)")
@@ -784,22 +778,22 @@ def usb_camera_detection(self):
         cap.release()
     except Exception as e:
         print(f"USB Camera detection error: {e}")
-```
 
     print("USB Camera not connected (OpenCV failed)")
     return False
-Преимущества: работает для любой UVC-камеры, независимо от имени в lsusb.
+```
 
-🎥 Запись видео
-Проблема: imageio с libx264 не работает (ошибки quality, broadcast).
+**Преимущества:** работает для **любой** UVC-камеры, независимо от имени в `lsusb`.
 
-Решение: cv2.VideoWriter с кодеком mp4v:
+### 🎥 Запись видео
+
+**Проблема:** `imageio` с `libx264` не работает (ошибки `quality`, `broadcast`).
+
+**Решение:** `cv2.VideoWriter` с кодеком `mp4v`:
 
 ```python
 # В cv_ctrl.py (frame_process)
 if self.set_video_record_flag and not self.video_record_status_flag:
-```
-
     current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     video_filename = f'{self.video_path}video_{current_time}.mp4'
     h, w = input_frame.shape[:2]
@@ -817,31 +811,29 @@ elif self.set_video_record_flag and self.video_record_status_flag:
 elif not self.set_video_record_flag and self.video_record_status_flag:
     self.video_record_status_flag = False
     self.writer.release()
-Важно: mp4v (MPEG-4 Part 2) не воспроизводится в браузерах. Для H.264 нужен VPU (CedarC) — пересборка Armbian с PR #10835.
 ```
 
-🧠 NPU YOLOv5s на видео
-Результат: 39 FPS, bounding boxes в реальном времени.
+**Важно:** `mp4v` (MPEG-4 Part 2) **не воспроизводится** в браузерах. Для H.264 нужен **VPU** (CedarC) — пересборка Armbian с PR #10835.
 
-Что работает:
+### 🧠 NPU YOLOv5s на видео
 
-YOLOv5s обнаруживает объекты (person, tv, chair и т.д.).
+**Результат:** **39 FPS**, bounding boxes в реальном времени.
 
-Отображает bounding boxes с уверенностью.
+**Что работает:**
+- YOLOv5s обнаруживает объекты (`person`, `tv`, `chair` и т.д.).
+- Отображает bounding boxes с уверенностью.
+- Работает на видео с USB-камеры.
 
-Работает на видео с USB-камеры.
+**Скорость:** ~25 мс на кадр.
 
-Скорость: ~25 мс на кадр.
+### 🎛️ NPU по кнопке без ESP32
 
-🎛️ NPU по кнопке без ESP32
-Проблема: Кнопка OBJECTS отправляла {"T":10304} в UART, но без ESP32 — cv_mode не обновлялся, NPU не включался.
+**Проблема:** Кнопка `OBJECTS` отправляла `{"T":10304}` в UART, но **без ESP32** — `cv_mode` не обновлялся, NPU не включался.
 
-Решение: Локальный cmd_action в handle_command (app.py):
+**Решение:** Локальный `cmd_action` в `handle_command` (`app.py`):
 
 ```python
 def handle_command():
-```
-
     command = request.form['command']
     print("Received command:", command)
     cvf.info_update("CMD:" + command, (0,255,255), 0.36)
@@ -857,141 +849,140 @@ def handle_command():
                 print(f"[handle_command] Local cmd_action executed for T={t_value}")
     except Exception as e:
         print(f"[handle_command] Local cmd_action error: {e}")
-```
 
     try:
         cmdline_ctrl(command)
     except Exception as e:
         print(f"[app.handle_command] error: {e}")
     return jsonify({"status": "success", "message": "Command received"})
-Результат: Кнопка OBJECTS локально включает NPU (без ESP32) и одновременно отправляет команду в UART (для ESP32).
-
-📊 OSD (On-Screen Display)
-Проблема: OSD не обновлялся — CPU: 0, RAM: 0, FPS: 0, TEMP: 0, RSSI: 0.
-
-Причина 1: В control.js была проверка if (data[base_voltage] != 0), которая блокировала обновление OSD без ESP32.
-
-Решение 1: Убрана проверка base_voltage:
-
-```javascript
 ```
 
+**Результат:** Кнопка `OBJECTS` **локально** включает NPU (без ESP32) **и одновременно** отправляет команду в UART (для ESP32).
+
+### 📊 OSD (On-Screen Display)
+
+**Проблема:** OSD не обновлялся — `CPU: 0, RAM: 0, FPS: 0, TEMP: 0, RSSI: 0`.
+
+**Причина 1:** В `control.js` была проверка `if (data[base_voltage] != 0)`, которая **блокировала** обновление OSD без ESP32.
+
+**Решение 1:** Убрана проверка `base_voltage`:
+
+```javascript
 socket.on('update', function(data) {
     // Убрана проверка base_voltage — она блокировала OSD без ESP32
     try {
         ...
     }
 });
-Причина 2: Температура в sysfs — millidegrees (24242 = 24.242 °C).
 ```
 
-Решение 2: Деление на 1000:
+**Причина 2:** Температура в `sysfs` — **millidegrees** (24242 = 24.242 °C).
+
+**Решение 2:** Деление на 1000:
 
 ```python
 # os_info.py — get_cpu_temperature
-```
-
 with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
     temperature_str = f.read().strip()
 temperature = float(temperature_str) / 1000.0
 return round(temperature, 1)
-Причина 3: RSSI — iw dev wlan0 link отдаёт signal: -59 dBm, а код искал Signal level=-59 (старый формат iwconfig).
 ```
 
-Решение 3: Новое регулярное выражение:
+**Причина 3:** RSSI — `iw dev wlan0 link` отдаёт `signal: -59 dBm`, а код искал `Signal level=-59` (старый формат `iwconfig`).
+
+**Решение 3:** Новое регулярное выражение:
 
 ```python
 # os_info.py — get_signal_strength
-```
-
 signal_strength = re.search(r"signal:\s*(-\d+)", output)
 if signal_strength:
     return int(signal_strength.group(1))
 return 0
-Результат: OSD полностью работает:
 ```
 
-CPU: 8.2%
+**Результат:** OSD полностью работает:
+- **CPU: 8.2%**
+- **RAM: 3.7%**
+- **FPS: 15.0**
+- **TEMP: 23.7 °C**
+- **RSSI: -59 dBm**
+- **Photos: 0.45 MB**
+- **Videos: 2.76 MB**
 
-RAM: 3.7%
+### 🐛 Убрана `NoneType` ошибка
 
-FPS: 15.0
+**Проблема:** `base.base_data['v']` — `base_data = None` (ESP32 не подключён).
 
-TEMP: 23.7 °C
-
-RSSI: -59 dBm
-
-Photos: 0.45 MB
-
-Videos: 2.76 MB
-
-🐛 Убрана NoneType ошибка
-Проблема: base.base_data['v'] — base_data = None (ESP32 не подключён).
-
-Решение: base.base_data['v'] if base.base_data else 0:
+**Решение:** `base.base_data['v'] if base.base_data else 0`:
 
 ```python
 # app.py — update_data_websocket_single
-```
-
 f['fb'][f'base_voltage']:base.base_data['v'] if base.base_data else 0,
-📝 Обновления в CSS
-templates/style.css:
-
 ```
+
+### 📝 Обновления в CSS
+
+**`templates/style.css`:**
 
 ```css
-```
-
 .video img{
     width: 960px;
     height: 540px;
     border-radius: 4px;
     object-fit: contain;
 }
-🚧 Что осталось
-Ближайшее
-□ H.264 — аппаратная запись видео (нужен VPU, пересборка Armbian).
-□ CSI-камера — вторая камера (обзорная, на PT).
-□ GPU — ускорение OpenCV (пересборка Armbian).
-□ Переключатель камер — USB / CSI в веб-интерфейсе.
-□ ArUco-маркеры — логика парковки.
-□ ESP32 (ИК, сонары) — код для прошивки.
-□ Пересборка Armbian с PR #10835 — GPU, VPU, H.264, CSI.
-Долгосрочное
-□ MediaPipe на NPU — если получится портировать.
-□ YOLOv8 — более точная модель.
-□ Автопилот — SLAM или визуальная одометрия.
-□ Голосовое управление — через pyttsx3 + распознавание.
-🔗 GitHub-репозиторий
-Форк: ZHNovell/ugv_rpi
 ```
 
-Оригинал: waveshareteam/ugv_rpi
-📚 Полезные ссылки
-http://www.orangepi.org/html/hardWare/computerAndMicrocontrollers/details/Orange-Pi-4-Pro.html
-https://www.waveshare.com/wiki/WAVE_ROVER
-https://www.waveshare.com/wiki/General_Driver_for_Robots
-https://www.waveshare.com/wiki/2-Axis_Pan-Tilt_Camera_Module
-https://github.com/waveshareteam/ugv_rpi
-https://github.com/waveshareteam/ugv_base_general
-https://github.com/armbian/build/pull/10712
-https://dl.radxa.com/cubie/allwinner-model-zoo.tar.gz
-https://github.com/armbian/build/pull/10835
-https://github.com/ijiki16/build/tree/sun60iw2-4pro-gpu-desktop-upstream
-https://www.waveshare.com/wiki/08_Slave_Device_JSON_Instruction_Set
-https://www.waveshare.com/wiki/Jetson_03_Pan-Tilt_Control_and_LED_Light_Control
+## 🚧 Что осталось
 
-👥 Авторы
-ZHNovell — адаптация под Orange Pi 4 Pro, NPU, веб-интерфейс.
+### Ближайшее
 
-Waveshare — оригинальный ugv_rpi.
+- [ ] **H.264** — аппаратная запись видео (нужен VPU, пересборка Armbian).
+- [ ] **CSI-камера** — вторая камера (обзорная, на PT).
+- [ ] **GPU** — ускорение OpenCV (пересборка Armbian).
+- [ ] **Переключатель камер** — USB / CSI в веб-интерфейсе.
+- [ ] **ArUco-маркеры** — логика парковки.
+- [ ] **ESP32 (ИК, сонары)** — код для прошивки.
+- [ ] **Пересборка Armbian с PR #10835** — GPU, VPU, H.264, CSI.
 
-deece — поддержка A733 в Armbian.
+### Долгосрочное
 
-📅 История изменений
-2026-09-28: Первый запуск Orange Pi 4 Pro, UART7, I2C2, NPU, YOLOv5s, кнопки веб-интерфейса.
+- [ ] **MediaPipe на NPU** — если получится портировать.
+- [ ] **YOLOv8** — более точная модель.
+- [ ] **Автопилот** — SLAM или визуальная одометрия.
+- [ ] **Голосовое управление** — через `pyttsx3` + распознавание.
 
-2026-09-29: USB-камера, запись видео, NPU на видео, OSD, локальный cmd_action.
+## 🔗 GitHub-репозиторий
 
-Последнее обновление: 2026-09-29
+- **Форк:** [ZHNovell/ugv_rpi](https://github.com/ZHNovell/ugv_rpi)
+- **Оригинал:** [waveshareteam/ugv_rpi](https://github.com/waveshareteam/ugv_rpi)
+
+## 📚 Полезные ссылки
+
+- [Orange Pi 4 Pro](http://www.orangepi.org/html/hardWare/computerAndMicrocontrollers/details/Orange-Pi-4-Pro.html)
+- [Waveshare WAVE ROVER](https://www.waveshare.com/wiki/WAVE_ROVER)
+- [General Driver for Robots](https://www.waveshare.com/wiki/General_Driver_for_Robots)
+- [2-Axis Pan-Tilt](https://www.waveshare.com/wiki/2-Axis_Pan-Tilt_Camera_Module)
+- [ugv_rpi (GitHub)](https://github.com/waveshareteam/ugv_rpi)
+- [ugv_base_general (GitHub)](https://github.com/waveshareteam/ugv_base_general)
+- [Armbian PR #10712 (A733)](https://github.com/armbian/build/pull/10712)
+- [Allwinner Model Zoo](https://dl.radxa.com/cubie/allwinner-model-zoo.tar.gz)
+- [PR #10835 (GPU/VPU)](https://github.com/armbian/build/pull/10835)
+- [Ветка ijiki16](https://github.com/ijiki16/build/tree/sun60iw2-4pro-gpu-desktop-upstream)
+- [JSON-команды (Waveshare)](https://www.waveshare.com/wiki/08_Slave_Device_JSON_Instruction_Set)
+- [Jetson-документация](https://www.waveshare.com/wiki/Jetson_03_Pan-Tilt_Control_and_LED_Light_Control)
+
+## 👥 Авторы
+
+- **ZHNovell** — адаптация под Orange Pi 4 Pro, NPU, веб-интерфейс.
+- **Waveshare** — оригинальный `ugv_rpi`.
+- **deece** — поддержка A733 в Armbian.
+
+## 📅 История изменений
+
+- **2026-09-28:** Первый запуск Orange Pi 4 Pro, UART7, I2C2, NPU, YOLOv5s, кнопки веб-интерфейса.
+- **2026-09-29:** USB-камера, запись видео, NPU на видео, OSD, локальный `cmd_action`.
+
+---
+
+**Последнее обновление:** 2026-09-30

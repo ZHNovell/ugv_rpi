@@ -332,11 +332,7 @@ cd /root/npu-files/zoo/examples/yolov5/build
 
                    -i ../model/dog.jpg -l 1 -m 10
 Результат:
-```
-
-```text
-```
-
+```bash
 detection num: 3
 16:  91%, [ 135,  221,  311,  535], dog
  2:  67%, [ 470,   74,  688,  173], car

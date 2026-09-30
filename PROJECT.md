@@ -312,7 +312,6 @@ unzip opencv-4.9.0-aarch64-linux-sunxi-glibc.zip
 ```
 
 cd /root/npu-files/zoo/examples/yolov5
-```bash
 mkdir -p build && cd build
 ```
 

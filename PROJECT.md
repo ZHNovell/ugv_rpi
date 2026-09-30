@@ -309,8 +309,6 @@ scp -r ~/awnpu-zoo/awnpu_model_zoo-v0.9.0-*/cmake_toolchain root@<IP>:/root/npu-
 # На Orange Pi
 cd /root/npu-files/zoo/3rdparty/opencv/
 unzip opencv-4.9.0-aarch64-linux-sunxi-glibc.zip
-```
-
 cd /root/npu-files/zoo/examples/yolov5
 mkdir -p build && cd build
 ```

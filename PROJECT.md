@@ -452,6 +452,37 @@ base = BaseController('/dev/ttyS7', 115200)
 sed -i 's/si\.eth0_ip/si.end0_ip/g' app.py
 ```
 
+**Изменение 3:** Добавлен обработчик `SIGTERM` (для корректного завершения при `shutdown`).
+
+```python
+import signal
+import sys
+
+def cleanup_handler(signum, frame):
+    print(f"[app] Received signal {signum}, cleaning up...", flush=True)
+    try:
+        if hasattr(cvf, "camera") and cvf.camera:
+            cvf.camera.release()
+            print("[app] Camera released", flush=True)
+    except Exception as e:
+        print(f"[app] Camera release error: {e}", flush=True)
+    try:
+        if hasattr(cvf, "writer") and cvf.writer:
+            cvf.writer.release()
+            print("[app] Video writer released", flush=True)
+    except Exception as e:
+        print(f"[app] Writer release error: {e}", flush=True)
+    try:
+        cvf.cv_event.set()
+    except Exception:
+        pass
+    print("[app] Cleanup done, exiting", flush=True)
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, cleanup_handler)
+signal.signal(signal.SIGINT, cleanup_handler)
+```
+
 ### `cv_ctrl.py`
 
 **Изменение 1:** Оборачиваем импорты в `try/except`.

@@ -987,7 +987,7 @@ f['fb'][f'base_voltage']:base.base_data['v'] if base.base_data else 0,
 sudo dd if=/dev/mmcblk1 of=/dev/mmcblk0 bs=1M count=20 conv=notrunc
 ```
 ### ⚠️ Отключение CQE (баг драйвера sunxi-mmc)
-Проблема: драйвер sunxi-mmc на A733 имеет баг с CQE. При HS400 (200 МГц) CQE сбоит при записи, что повреждает загрузчик на eMMC.
+**Проблема:** драйвер sunxi-mmc на A733 имеет баг с CQE. При HS400 (200 МГц) CQE сбоит при записи, что повреждает загрузчик на eMMC.
 
 **Симптомы:**
 
@@ -1000,7 +1000,7 @@ sudo dd if=/dev/mmcblk1 of=/dev/mmcblk0 bs=1M count=20 conv=notrunc
 ```bash
 sudo fdtput -t i /boot/dtb/allwinner/sun60i-a733-orangepi-4-pro.dtb /soc@3000000/sdmmc@4022000 max-frequency 52000000
 ```
-Результат: dmesg | grep cqhci — ошибки исчезают, eMMC не повреждается.
+**Результат:** dmesg | grep cqhci — ошибки исчезают, eMMC не повреждается.
 
 
 

@@ -974,6 +974,38 @@ f['fb'][f'base_voltage']:base.base_data['v'] if base.base_data else 0,
     object-fit: contain;
 }
 ```
+## 🆕 Обновления (2026-10-01)
+
+### 💾 Ручное копирование на eMMC (обход бага `armbian-install`)
+
+**Проблема:** `armbian-install` **неправильно копирует** `boot_package` на eMMC. После **выключения** система **не загружается** (`bad magic`, `Loading boot-pkg fail`).
+
+**Решение:** **ручное копирование** системы с SD на eMMC (см. **раздел «Установка ОС»**).
+
+**Важно:** после ручного копирования **обязательно** скопировать **20 МБ** загрузчика:
+```bash
+sudo dd if=/dev/mmcblk1 of=/dev/mmcblk0 bs=1M count=20 conv=notrunc
+```
+### ⚠️ Отключение CQE (баг драйвера sunxi-mmc)
+Проблема: драйвер sunxi-mmc на A733 имеет баг с CQE. При HS400 (200 МГц) CQE сбоит при записи, что повреждает загрузчик на eMMC.
+
+**Симптомы:**
+
+```dmesg | grep cqhci → cqhci: Failed to halt, cmd 12, RTO.```
+
+Система не загружается с eMMC после выключения.
+
+**Решение:** снизить частоту eMMC до 52 МГц (HS-режим, без CQE):
+
+```bash
+sudo fdtput -t i /boot/dtb/allwinner/sun60i-a733-orangepi-4-pro.dtb /soc@3000000/sdmmc@4022000 max-frequency 52000000
+```
+Результат: dmesg | grep cqhci — ошибки исчезают, eMMC не повреждается.
+
+
+
+
+
 
 ## 🚧 Что осталось
 

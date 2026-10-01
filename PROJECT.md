@@ -286,112 +286,47 @@ pip install imageio pygame-ce pyttsx3 netifaces
 - **aiortc 1.15.0** (не 1.8.0).
 - **i2c-tools**, **picocom**, **espeak-ng** — установлены **отдельно** (для UART, I2C, TTS).
 
-🧠 NPU: Установка и настройка
-Драйвер NPU (уже в ядре)
+## 🧠 NPU: Установка и настройка
+
+### Драйвер NPU (уже в ядре)
 
 ```bash
 ls -la /dev/vipcore
 # crw-rw-rw- 1 root root 199, 0 ... /dev/vipcore
-```
 
-```bash
 lsmod | grep vipcore
 # vipcore 270336 0
 ```
-
+### Model Zoo (YOLOv5s)
 ```bash
-dmesg | grep -i vipcore
-# npu[152][152] vipcore, platform driver init
-# npu[152][152] vipcore, device_cnt=1, core_cnt=1
-```
-
-Userspace NPU (перенос из edge-образа)
-Из edge-образа скопированы:
-```
-
-/usr/bin/lenet — утилита тестирования LeNet.
-
-/usr/bin/vpm_run — утилита запуска NBG.
-
-/usr/lib/aarch64-linux-gnu/libVIPhal.so — HAL.
-
-/usr/lib/aarch64-linux-gnu/libNBGlinker.so — линкер.
-
-/etc/npu/ — модели (lenet, vpm_run).
-```
-Установка:
-
-```bash
-cp ~/npu-files/lenet /usr/bin/
-cp ~/npu-files/vpm_run /usr/bin/
-chmod +x /usr/bin/lenet /usr/bin/vpm_run
-```
-
-```bash
-cp ~/npu-files/libVIPhal.so /usr/lib/aarch64-linux-gnu/
-cp ~/npu-files/libNBGlinker.so /usr/lib/aarch64-linux-gnu/
-```
-
-```bash
-mkdir -p /etc/npu
-cp -r ~/npu-files/npu/lenet /etc/npu/
-cp -r ~/npu-files/npu/vpm_run /etc/npu/
-```
-
-Тест NPU
-```bash
-lenet /etc/npu/lenet/model/lenet.nb /etc/npu/lenet/input_data/lenet.dat
-```
-# Вывод: inference ~0.36 ms
-
-```bash
-cd /etc/npu/vpm_run
-vpm_run -s sample.txt -l 1 -d 0
-```
-# Вывод: inference ~2979 us
-Model Zoo (YOLOv5s)
-
-```bash
-# На Ubuntu (VirtualBox)
+cd /root
 wget https://dl.radxa.com/cubie/allwinner-model-zoo.tar.gz
-tar -xzf allwinner-model-zoo.tar.gz -C ~/awnpu-zoo/
-```
+tar -xzf allwinner-model-zoo.tar.gz
 
-# Скопировать на Orange Pi
-```bash
-scp -r ~/awnpu-zoo/awnpu_model_zoo-v0.9.0-*/examples/yolov5 root@<IP>:/root/npu-files/
-scp -r ~/awnpu-zoo/awnpu_model_zoo-v0.9.0-*/3rdparty root@<IP>:/root/npu-files/zoo/
-scp -r ~/awnpu-zoo/awnpu_model_zoo-v0.9.0-*/common root@<IP>:/root/npu-files/zoo/
-scp -r ~/awnpu-zoo/awnpu_model_zoo-v0.9.0-*/cmake_toolchain root@<IP>:/root/npu-files/zoo/
-```
-
-Сборка YOLOv5s демо
-```bash
-# На Orange Pi
-cd /root/npu-files/zoo/3rdparty/opencv/
+cd /root/awnpu_model_zoo-v0.9.0-*/3rdparty/opencv/
 unzip opencv-4.9.0-aarch64-linux-sunxi-glibc.zip
-cd /root/npu-files/zoo/examples/yolov5
+```
+
+### Сборка YOLOv5s демо
+```bash
+cd /root/awnpu_model_zoo-v0.9.0-*/examples/yolov5
 mkdir -p build && cd build
-```
 
-# Правка CMakeLists.txt
-```bash
 sed -i 's|elseif(CMAKE_C_COMPILER MATCHES "aarch64")|elseif(TARGET_NAME STREQUAL "A733")|' ../CMakeLists.txt
-```
 
-# Сборка
-```bash
 cmake .. -DTARGET_NAME=A733 -DCMAKE_SYSTEM_NAME=Linux
 make -j4
 ```
 
-Запуск YOLOv5s
+### Запуск YOLOv5s
 ```bash
-cd /root/npu-files/zoo/examples/yolov5/build
+cd /root/awnpu_model_zoo-v0.9.0-*/examples/yolov5/build
+LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-*/common/npuruntime/lib_linux_aarch64/A733 \
 ./yolov5_demo_a733 -nb ../model/yolov5s_rt_uint8_a733.nb \
 -i ../model/dog.jpg -l 1 -m 10
 ```
-Результат:
+
+### Результат:
 ```text
 detection num: 3
 16:  91%, [ 135,  221,  311,  535], dog
@@ -399,6 +334,8 @@ detection num: 3
  1:  61%, [ 155,  118,  573,  424], bicycle
 Скорость: ~25 мс на кадр (~39 FPS).
 ```
+
+**Важно:** если LD_LIBRARY_PATH не указать — будет error while loading shared libraries: libNBGlinker.so.
 
 ## 🐍 Python-обёртка для NPU (`yolov5_npu.py`)
 
@@ -415,9 +352,10 @@ import subprocess
 import re
 import os
 
-DEMO_PATH = "/root/npu-files/zoo/examples/yolov5/build/yolov5_demo_a733"
-MODEL_PATH = "/root/npu-files/zoo/examples/yolov5/model/yolov5s_rt_uint8_a733.nb"
-LD_LIBRARY_PATH = "/root/npu-files/zoo/common/npuruntime/lib_linux_aarch64/A733"
+# Актуальные пути (после распаковки Model Zoo)
+DEMO_PATH = "/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov5/build/yolov5_demo_a733"
+MODEL_PATH = "/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov5/model/yolov5s_rt_uint8_a733.nb"
+LD_LIBRARY_PATH = "/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733"
 
 
 def detect(image_path):
@@ -456,12 +394,11 @@ def detect(image_path):
 
 
 if __name__ == '__main__':
-    image = "/root/npu-files/zoo/examples/yolov5/model/dog.jpg"
+    image = "/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov5/model/dog.jpg"
     print(f"Testing on {image}...")
     detections = detect(image)
     for det in detections:
         print(f"  {det['class']}: {det['confidence']*100:.0f}% at {det['bbox']}")
-```
 
 ## 🔧 Адаптация кода `ugv_rpi`
 

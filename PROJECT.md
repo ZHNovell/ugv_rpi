@@ -37,34 +37,39 @@
 ## 🛠️ Сборка ОС (Armbian)
 
 **Репозиторий для сборки:**
-- [deece/armbian-mellowflyc5-build](https://github.com/deece/armbian-mellowflyc5-build/tree/feature/sunxi-a733-orangepi4pro)
-- [PR #10712 (A733)](https://github.com/armbian/build/pull/10712)
+- [PR #10835 (GPU/VPU/NPU/ISP)](https://github.com/armbian/build/pull/10835)
+- [Ветка ijiki16](https://github.com/ijiki16/build/tree/sun60iw2-4pro-gpu-desktop-upstream)
 
 **Команды сборки:**
 
 ```bash
 git clone https://github.com/armbian/build.git
 cd armbian-build
-git fetch origin refs/pull/10712/head:pr-10712
-git checkout pr-10712
+git fetch origin pull/10835/head:pr-10835
+git checkout pr-10835
 
-./compile.sh BOARD=orangepi4pro BRANCH=edge RELEASE=trixie \
+./compile.sh BOARD=orangepi4pro BRANCH=vendor RELEASE=trixie \
   BUILD_DESKTOP=no BUILD_MINIMAL=yes \
   KERNEL_CONFIGURE=no KERNEL_BTF=no KERNEL_GIT=shallow
 ```
 
 **Результат:**
-- `Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_edge_7.2.8_minimal.img` (edge, Linux 7.2.8)
-- `Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_vendor_6.6.98_minimal.img` (vendor, Linux 6.6.98)
+- `Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_vendor_6.6.98_minimal.img (vendor, Linux 6.6.98)
 
-**Что включено:**
-- Ядро `7.2.8-edge-sun60iw2` (edge) или `6.6.98-vendor-sun60iw2` (vendor).
-- DTB: `sun60i-a733-orangepi-4-pro.dtb`.
-- NPU: `vipcore.ko` (драйвер), `libVIPhal.so`, `libNBGlinker.so` (userspace).
+
+**Что включено (PR #10835):**
+- Ядро 6.6.98-vendor-sun60iw2.
+- DTB: sun60i-a733-orangepi-4-pro.dtb.`.
+- GPU PowerVR BXM-4-64 — `pvrsrvkm.ko` (автозагрузка), EGL/GLES/GBM/Vulkan/OpenCL.
+- NPU VIPLite — `/dev/vipcore`, `libVIPhal.so`, `libNBGlinker.so`.
+- VPU CedarC — `/dev/cedar_dev`, `/dev/cedar_dev_ve2`.
+- ISP (libAWIspApi) — для CSI-камер.
 - Утилиты NPU: `/usr/bin/lenet`, `/usr/bin/vpm_run`.
+- GStreamer OMX — `gstreamer1.0-omx-allwinner` (плагин для VE).
 - Модели NPU: `/etc/npu/lenet/`, `/etc/npu/vpm_run/`.
+- udev-правила — `99-sun60iw2-permissions.rules`.
 
-**Важно:** Vendor-сборка (6.6.98) **не содержит** NPU-утилит. Edge-сборка (7.2.8) **содержит** их.
+**Важно:** Vendor-сборка (6.6.98) **не содержит** NPU-утилит.
 
 ## 💾 Установка ОС
 
@@ -72,8 +77,8 @@ git checkout pr-10712
 
 ```bash
 # На Ubuntu (VirtualBox)
-unxz Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_edge_7.2.8_minimal.img.xz
-sudo dd if=Armbian-...-minimal.img of=/dev/sdX bs=4M status=progress
+unxz Armbian-...-minimal.img.xz
+sudo dd if=Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_vendor_6.6.98_minimal.img of=/dev/sdX bs=4M status=progress
 sync
 ```
 
@@ -84,16 +89,86 @@ sync
 4. Пройти `armbian-firstlogin` (через HDMI + клавиатуру).
 5. Сменить пароль root, создать пользователя.
 
-**Перенос на eMMC:**
+**Перенос на eMMC (РУЧНОЙ, НЕ ЧЕРЕЗ armbian-install!):**
+
+**Важно:** armbian-install багованный на Orange Pi 4 Pro — он неправильно копирует boot_package на eMMC. 
+Использовать только ручное копирование.
 
 ```bash
-# На Orange Pi
-armbian-install
-# Выбрать eMMC, следовать инструкциям
-# После завершения — выключить, вытащить SD, загрузиться с eMMC
-```
+# 1. Размонтировать eMMC
+sudo umount /mnt/emmc 2>/dev/null
 
+# 2. Разметить eMMC (таблица разделов как на SD)
+sudo sfdisk -d /dev/mmcblk1 | sudo sfdisk /dev/mmcblk0
+
+# 3. Форматировать eMMC
+sudo mkfs.ext4 -F /dev/mmcblk0p1
+
+# 4. Смонтировать eMMC
+sudo mkdir -p /mnt/emmc
+sudo mount /dev/mmcblk0p1 /mnt/emmc
+
+# 5. Скопировать систему с SD на eMMC (5-10 минут)
+sudo rsync -aAXHv --exclude={/dev/*,/proc/*,/sys/*,/tmp/*,/run/*,/mnt/*,/media/*,/lost+found,/var/log.hdd/*} / /mnt/emmc/
+
+# 6. Настроить armbianEnv.txt (новый UUID eMMC)
+sudo blkid /dev/mmcblk0p1  # запомнить UUID
+sudo sed -i 's/^rootdev=.*/rootdev=UUID=<НОВЫЙ_UUID>/' /mnt/emmc/boot/armbianEnv.txt
+
+# 7. Настроить fstab (новый UUID eMMC)
+sudo sed -i 's/^UUID=.* \/ ext4/UUID=<НОВЫЙ_UUID> \/ ext4/' /mnt/emmc/etc/fstab
+
+# 8. Отключить авто-resize на eMMC
+sudo mkdir -p /mnt/emmc/etc/systemd/system
+sudo ln -sf /dev/null /mnt/emmc/etc/systemd/system/armbian-resize-filesystem.service
+
+# 9. Скопировать загрузчик (U-Boot + boot_package) — 20 МБ
+sudo dd if=/dev/mmcblk1 of=/dev/mmcblk0 bs=1M count=20 conv=notrunc
+
+# 10. Синхронизировать и размонтировать
+sudo sync
+sudo umount /mnt/emmc
+
+# 11. Выключить, вытащить SD, загрузиться с eMMC
+sudo shutdown -h now
+```
+##После первой загрузки с eMMC — расширить раздел до 29 ГБ:##
+```bash
+# 1. Расширить раздел
+sudo parted /dev/mmcblk0 resizepart 1 100%
+# (на вопрос "Yes/No?" — Yes)
+
+# 2. Расширить файловую систему
+sudo resize2fs /dev/mmcblk0p1
+
+# 3. Проверить
+df -h /
+# Должно быть ~29 ГБ, ~21 ГБ свободно
+```
 **Важно:** eMMC-модуль (32 ГБ) подключается в штатный разъём платы.
+
+## ⚠️ Важно: Отключение CQE (баг драйвера `sunxi-mmc`)
+
+**Проблема:** драйвер `sunxi-mmc` на A733 имеет **баг с CQE** (Command Queue Engine). При **высокой частоте (HS400, 200 МГц)** CQE **сбоит** при записи, что **повреждает загрузчик** на eMMC.
+
+**Симптомы:**
+- `dmesg | grep cqhci` → `cqhci: Failed to halt`, `cmd 12, RTO`.
+- Система **не загружается** с eMMC после **выключения**.
+
+**Решение:** снизить частоту eMMC до **52 МГц** (HS-режим, без CQE).
+
+```bash
+# Снизить max-frequency в DTB
+sudo fdtput -t i /boot/dtb/allwinner/sun60i-a733-orangepi-4-pro.dtb /soc@3000000/sdmmc@4022000 max-frequency 52000000
+
+# Проверить
+sudo dtc -I dtb -O dts /boot/dtb/allwinner/sun60i-a733-orangepi-4-pro.dtb 2>/dev/null | grep -A 25 "mmc@4022000" | grep "max-frequency"
+# Должно быть: max-frequency = <0x3197500>;  (52 МГц)
+
+# Перезагрузиться
+sudo reboot
+```
+## После этого: dmesg | grep cqhci — ошибки исчезнут, eMMC не будет повреждаться.
 
 ## ⚙️ Настройка интерфейсов
 ### UART7 (пины 8/10)
@@ -113,24 +188,18 @@ ls -la /dev/ttyS7
 picocom -b 115200 /dev/ttyS7
 # Печатать символы → должны эхо-возвращаться
 # Выход: Ctrl+A, Ctrl+Q
-
-### I2C2 (пины 19/23)
 ```
-
+### I2C2 (пины 19/23)
 ```bash
 # Активация через armbian-config
 sudo armbian-config
 # System → Kernel → Manage device tree overlays
 # Включить: i2c2
 # Сохранить, выйти, перезагрузиться
-```
 
-# Проверка
-```bash
 ls -la /dev/i2c-2
 # Должно быть: crw------- 1 root root 89, 2 ... /dev/i2c-2
 ```
-
 # Сканирование шины
 ```bash
 apt install -y i2c-tools
@@ -143,7 +212,9 @@ armbianEnv.txt (после активации):
 ```text
 overlays=i2c2 uart7
 ```
+
 ## 📦 Установка зависимостей
+
 ### Системные пакеты
 
 ```bash
@@ -151,8 +222,6 @@ sudo apt update
 sudo apt install -y \
     git python3-pip python3-venv python3-dev \
     cmake build-essential \
-```
-
     libopenblas-dev liblapack-dev libhdf5-dev \
     libjpeg-dev libtiff-dev libpng-dev \
     libavcodec-dev libavformat-dev libswscale-dev \
@@ -161,7 +230,9 @@ sudo apt install -y \
     gfortran libfreetype-dev libharfbuzz-dev \
     libfribidi-dev libgstreamer1.0-dev \
     libgstreamer-plugins-base1.0-dev \
-    libgstreamer-plugins-bad1.0-dev
+    libgstreamer-plugins-bad1.0-dev \
+    i2c-tools picocom unzip espeak-ng libespeak1
+```
 ### Python-зависимости (venv)
 ```bash
 cd ~/ugv_rpi
@@ -169,9 +240,7 @@ python3 -m venv ugv-env
 source ugv-env/bin/activate
 pip install --upgrade pip
 ```
-
-### requirements.txt (Python 3.13):
-
+### requirements.txt (Python 3.13)
 ```text
 # Веб-сервер
 Flask==3.0.3
@@ -203,28 +272,21 @@ pyserial==3.5
 opencv-python-headless==4.10.0.84
 Pillow==11.3.0
 imutils==0.5.4
-
-# Дополнительные (не в requirements.txt, но нужны)
-imageio==2.38.0
-pygame-ce==2.5.8
-pyttsx3==2.99
-netifaces==0.11.0
 ```
-
-**Установка:**
+### Установка:
 
 ```bash
 pip install -r requirements.txt
 pip install imageio pygame-ce pyttsx3 netifaces
 ```
-
 **Ключевые моменты:**
 - **Pillow 11.3.0** (не 10.3.0 — та не работает с Python 3.13).
 - **pygame-ce** (не pygame — у pygame нет wheel для Python 3.13 + ARM64).
 - **av 17.1.0** (не 12.3.0 — та не работает).
 - **aiortc 1.15.0** (не 1.8.0).
+- **i2c-tools**, **picocom**, **espeak-ng** — установлены **отдельно** (для UART, I2C, TTS).
 
-## 🧠 NPU: Установка и настройка
+🧠 NPU: Установка и настройка
 Драйвер NPU (уже в ядре)
 
 ```bash

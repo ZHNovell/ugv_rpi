@@ -678,6 +678,17 @@ function speedCtrl(inputSpd){
 }
 ```
 
+**Дополнительно:** В `socket.on('update', ...)` **убрана** проверка `base_voltage` (она **блокировала** обновление OSD без ESP32).
+
+```javascript
+socket.on('update', function(data) {
+    // Убрана проверка base_voltage — она блокировала OSD без ESP32
+    try {
+        ...
+    }
+});
+```
+
 ## 🚀 Автозапуск `app.py` (systemd)
 
 **Файл:** `/etc/systemd/system/ugv.service`

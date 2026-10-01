@@ -1002,8 +1002,56 @@ sudo fdtput -t i /boot/dtb/allwinner/sun60i-a733-orangepi-4-pro.dtb /soc@3000000
 ```
 **Результат:** dmesg | grep cqhci — ошибки исчезают, eMMC не повреждается.
 
+### 📏 Расширение eMMC до 29 ГБ
 
+**Проблема:** после ручного копирования раздел eMMC — **7.2 ГБ** (как SD).
 
+**Решение:**
+```bash
+sudo parted /dev/mmcblk0 resizepart 1 100%
+sudo resize2fs /dev/mmcblk0p1
+```
+### 🛑 `TimeoutStopSec=5`, `KillMode=control-group`, `SendSIGKILL=yes`
+
+**Проблема:** `systemctl stop ugv.service` и `shutdown -h now` **занимали 90 секунд** (systemd **ждал** завершения `app.py`), что **повреждало eMMC**.
+
+**Решение:** добавлены параметры в `ugv.service`:
+```ini
+TimeoutStopSec=5
+KillMode=control-group
+SendSIGKILL=yes
+```
+### 🐍 Обработчик `SIGTERM` в `app.py`
+
+**Проблема:** `app.py` **не завершался** корректно при `SIGTERM` (от systemd), что **блокировало shutdown**.
+
+**Решение:** добавлен **обработчик `SIGTERM`** (закрывает камеру, writer, выходит):
+```python
+import signal
+import sys
+
+def cleanup_handler(signum, frame):
+    print(f"[app] Received signal {signum}, cleaning up...", flush=True)
+    try:
+        if hasattr(cvf, "camera") and cvf.camera:
+            cvf.camera.release()
+    except Exception as e:
+        print(f"[app] Camera release error: {e}", flush=True)
+    try:
+        if hasattr(cvf, "writer") and cvf.writer:
+            cvf.writer.release()
+    except Exception as e:
+        print(f"[app] Writer release error: {e}", flush=True)
+    try:
+        cvf.cv_event.set()
+    except Exception:
+        pass
+    print("[app] Cleanup done, exiting", flush=True)
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, cleanup_handler)
+signal.signal(signal.SIGINT, cleanup_handler)
+```
 
 
 
@@ -1011,13 +1059,18 @@ sudo fdtput -t i /boot/dtb/allwinner/sun60i-a733-orangepi-4-pro.dtb /soc@3000000
 
 ### Ближайшее
 
-- [ ] **H.264** — аппаратная запись видео (нужен VPU, пересборка Armbian).
+- [x] **Пересборка Armbian с PR #10835** — GPU, VPU, H.264, CSI.
+- [x] **NPU YOLOv5s** — работает (39 FPS).
+- [x] **Отключение CQE** — eMMC стабильна.
+- [x] **Расширение eMMC** до 29 ГБ.
+- [x] **`TimeoutStopSec=5`**, **`KillMode=control-group`**, **`SendSIGKILL=yes`**.
+- [x] **Обработчик `SIGTERM`** в `app.py`.
+- [ ] **H.264** — аппаратная запись видео (нужен VPU).
 - [ ] **CSI-камера** — вторая камера (обзорная, на PT).
-- [ ] **GPU** — ускорение OpenCV (пересборка Armbian).
+- [ ] **GPU** — ускорение OpenCV (OpenCL).
 - [ ] **Переключатель камер** — USB / CSI в веб-интерфейсе.
 - [ ] **ArUco-маркеры** — логика парковки.
 - [ ] **ESP32 (ИК, сонары)** — код для прошивки.
-- [ ] **Пересборка Armbian с PR #10835** — GPU, VPU, H.264, CSI.
 
 ### Долгосрочное
 
@@ -1025,6 +1078,8 @@ sudo fdtput -t i /boot/dtb/allwinner/sun60i-a733-orangepi-4-pro.dtb /soc@3000000
 - [ ] **YOLOv8** — более точная модель.
 - [ ] **Автопилот** — SLAM или визуальная одометрия.
 - [ ] **Голосовое управление** — через `pyttsx3` + распознавание.
+
+
 
 ## 🔗 GitHub-репозиторий
 
@@ -1056,7 +1111,7 @@ sudo fdtput -t i /boot/dtb/allwinner/sun60i-a733-orangepi-4-pro.dtb /soc@3000000
 
 - **2026-09-28:** Первый запуск Orange Pi 4 Pro, UART7, I2C2, NPU, YOLOv5s, кнопки веб-интерфейса.
 - **2026-09-29:** USB-камера, запись видео, NPU на видео, OSD, локальный `cmd_action`.
-
+- **2026-10-01:** Ручное копирование на eMMC (обход бага `armbian-install`), отключение CQE (`max-frequency` 52 МГц), расширение eMMC до 29 ГБ, `TimeoutStopSec=5`, обработчик `SIGTERM` в `app.py`.
 ---
 
 **Последнее обновление:** 2026-09-30

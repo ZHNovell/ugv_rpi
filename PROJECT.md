@@ -399,7 +399,6 @@ if __name__ == '__main__':
     detections = detect(image)
     for det in detections:
         print(f"  {det['class']}: {det['confidence']*100:.0f}% at {det['bbox']}")
-```
 
 ## 🔧 Адаптация кода `ugv_rpi`
 

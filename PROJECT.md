@@ -705,6 +705,9 @@ WorkingDirectory=/root/ugv_rpi
 ExecStart=/root/ugv_rpi/ugv-env/bin/python /root/ugv_rpi/app.py
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=5
+KillMode=control-group
+SendSIGKILL=yes
 
 [Install]
 WantedBy=multi-user.target

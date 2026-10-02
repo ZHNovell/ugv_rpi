@@ -827,35 +827,52 @@ def usb_camera_detection(self):
 
 **Преимущества:** работает для **любой** UVC-камеры, независимо от имени в `lsusb`.
 
-### 🎥 Запись видео
+### 🎥 Запись видео — финальное решение (2026-10-02)
 
-**Проблема:** `imageio` с `libx264` не работает (ошибки `quality`, `broadcast`).
+**Требование:** во время записи **живой поток не должен прерываться** (оператор смотрит обстановку, а запись — для фиксации событий).
 
-**Решение:** `cv2.VideoWriter` с кодеком `mp4v`:
+**Архитектура (GStreamer `tee`):**
 
-```python
-# В cv_ctrl.py (frame_process)
-if self.set_video_record_flag and not self.video_record_status_flag:
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    video_filename = f'{self.video_path}video_{current_time}.mp4'
-    h, w = input_frame.shape[:2]
-    self.writer = cv2.VideoWriter(
-        video_filename,
-        cv2.VideoWriter_fourcc(*'mp4v'),
-        30,
-        (w, h)
-    )
-    self.video_record_status_flag = True
-elif self.set_video_record_flag and self.video_record_status_flag:
-    cv2.circle(input_frame, (15, 15), 5, (64, 64, 255), -1)
-    frame_to_write = cv2.cvtColor(input_frame, cv2.COLOR_BGRA2BGR)
-    self.writer.write(frame_to_write)
-elif not self.set_video_record_flag and self.video_record_status_flag:
-    self.video_record_status_flag = False
-    self.writer.release()
-```
+v4l2src → image/jpeg (MJPG, 1920x1080@30) → jpegdec → tee
+├─ queue (leaky) → videoconvert → BGR → appsink (живой поток — ВСЕГДА)
+└─ queue → videoconvert → videoscale → 1280x720 I420
+→ avenc_mjpeg → matroskamux → filesink (ветка записи, добавляется/убирается на лету)
 
-**Важно:** `mp4v` (MPEG-4 Part 2) **не воспроизводится** в браузерах. Для H.264 нужен **VPU** (CedarC) — пересборка Armbian с PR #10835.
+
+**Ключевые решения:**
+
+1. **`tee` после `jpegdec`** — камера читается один раз, поток идёт в две ветки. Живой поток **не прерывается** во время записи.
+2. **Контейнер `.mkv` (matroskamux), не `.avi`** — потому что камера даёт VFR (в темноте FPS падает до 15). AVI не хранит VFR корректно → видео ускорялось (10 сек → 7 сек). Matroska сохраняет реальные PTS → 10 секунд реального времени = 10 секунд в файле.
+3. **Энкодер `avenc_mjpeg`** (libav), не `jpegenc` — корректно ставит PTS.
+4. **`omxh264videoenc` и `omxmjpegvideoenc` НЕ используются** — в этой сборке они требуют `video/x-raw(memory:DMABuf)`, а `videoconvert` не может выдать DMABuf. Падает с `Failed to configure the buffer pool`.
+5. **Правильный teardown ветки записи:**
+   - **Отлинковать `rec_tee_pad` от `rec_queue`** (иначе EOS уйдёт вверх и убьёт живой поток).
+   - **Отправить EOS через sink pad `rec_queue`** — закроет `matroskamux`, запишет индекс.
+   - `set_state(NULL)` → `pipeline.remove()`.
+6. **`v4l2src do-timestamp=true`** (по умолчанию) — PTS берутся из системных часов, что даёт **корректную длительность при VFR**.
+
+**Параметры:**
+- Разрешение записи: **1280x720** (масштабируется через `videoscale`).
+- Битрейт MJPEG: **8 Мбит/с**, `qmin=3`, `qmax=10`.
+- Размер файла: ~10 МБ на 10 секунд.
+
+**Ограничение:** `.mkv` не проигрывается в браузере и Windows Media Player. Для просмотра — скачать и открыть в VLC / MPC-HC / ffmpeg-совместимом плеере.
+
+### 🐛 Фикс счётчика FPS (2026-10-02)
+
+**Проблема:** OSD показывал **удвоенный FPS** (60 вместо 30).
+
+**Причина:** счётчик `fps_count += 1` вызывался **дважды за кадр** — в `_process_frame_opencv` и в `frame_process`. Плюс `generate_frames` в `app.py` крутился в **свободном цикле** без ограничения.
+
+**Решение:**
+- **Один** счётчик — в начале `frame_process`.
+- В `generate_frames` добавлен **`time.sleep`** для лимита **30 FPS** (совпадает с реальным FPS камеры).
+- Побочный эффект: **задержка видео упала** с ~0.9 сек до ~0.1 сек, **CPU** — с 24% до 17%. Потому что мы перестали кормить браузер кадрами, которые он не успевал рисовать, и не гоняли `cv2.imencode` вхолостую.
+
+### 📁 UI галереи видео (2026-10-02)
+
+- `get_video_names` в `app.py` — фильтр расширений: `.mp4`, `.avi`, `.mkv`.
+- `control.js` — `strippedname` убирает любое из этих расширений; ссылка скачивает файл (`download`), имя без расширения.
 
 ### 🧠 NPU YOLOv5s на видео
 
@@ -1053,6 +1070,7 @@ signal.signal(signal.SIGTERM, cleanup_handler)
 signal.signal(signal.SIGINT, cleanup_handler)
 ```
 ### 🎥 VPU-энкодер (H.264, аппаратное кодирование)
+> ⚠️ **Устарело.** Этот путь через FFmpeg+pipe **прерывал живой поток**. Заменён на GStreamer `tee` + `avenc_mjpeg` + `matroskamux` (см. «Запись видео — финальное решение»).
 
 **Дата:** 2026-10-02
 
@@ -1106,7 +1124,7 @@ ffprobe -v error -show_format /tmp/test.mp4
 
 **Решение:** **GStreamer** `tee`:
 - **Ветка 1:** `jpegdec → videoconvert → BGR → appsink` (для Flask).
-- **Ветка 2:** **динамически** **добавляется** **при** **записи** (`omxh264videoenc → mp4mux → filesink`).
+- **Ветка 2:** **динамически** **добавляется** **при** **записи** (`avenc_mjpeg → matroskamux → .mkv `).
 
 **Ключевое:** **поток** **не** **прерывается** — **камера** **читается** **один** **раз**.
 
@@ -1119,6 +1137,12 @@ ffprobe -v error -show_format /tmp/test.mp4
 
 **Результат:** **поток** **работает** **параллельно** **с** **записью**.
 
+### 🆕 История изменений (дополнение)
+
+- **2026-10-02:** GStreamer `tee` — запись без прерывания живого потока. Контейнер `.mkv` (matroskamux) — VFR сохранён. `avenc_mjpeg` вместо `jpegenc`. Фикс счётчика FPS (двойной инкремент → один). Лимит `generate_frames` 30 FPS → задержка 0.1 сек, CPU 17%. UI галереи: фильтр `.mp4`/`.avi`/`.mkv`, скачивание вместо открытия в браузере.
+
+
+
 ## 🚧 Что осталось
 
 ### Ближайшее
@@ -1129,7 +1153,7 @@ ffprobe -v error -show_format /tmp/test.mp4
 - [x] **Расширение eMMC** до 29 ГБ.
 - [x] **`TimeoutStopSec=5`**, **`KillMode=control-group`**, **`SendSIGKILL=yes`**.
 - [x] **Обработчик `SIGTERM`** в `app.py`.
-- [ ] **H.264** — аппаратная запись видео (нужен VPU).
+- [x] **Запись видео с параллельным потоком** — GStreamer `tee` + `avenc_mjpeg` + `.mkv`.
 - [ ] **CSI-камера** — вторая камера (обзорная, на PT).
 - [ ] **GPU** — ускорение OpenCV (OpenCL).
 - [ ] **Переключатель камер** — USB / CSI в веб-интерфейсе.
@@ -1178,4 +1202,4 @@ ffprobe -v error -show_format /tmp/test.mp4
 - **2026-10-01:** Ручное копирование на eMMC (обход бага `armbian-install`), отключение CQE (`max-frequency` 52 МГц), расширение eMMC до 29 ГБ, `TimeoutStopSec=5`, обработчик `SIGTERM` в `app.py`.
 ---
 
-**Последнее обновление:** 2026-09-30
+**Последнее обновление:** 2026-10-02

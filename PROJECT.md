@@ -1052,8 +1052,50 @@ def cleanup_handler(signum, frame):
 signal.signal(signal.SIGTERM, cleanup_handler)
 signal.signal(signal.SIGINT, cleanup_handler)
 ```
+### 🎥 VPU-энкодер (H.264, аппаратное кодирование)
 
+**Дата:** 2026-10-02
 
+**Проблема:** `libvencoder.so` на A733 **не генерирует SPS/PPS** (возвращает филлер `0xFF`). Без SPS/PPS видео **не воспроизводится**.
+
+**Решение:** **обходной путь** через **FFmpeg + GStreamer**:
+- **FFmpeg** захватывает камеру (`/dev/video0`), конвертирует в **NV12**.
+- **Pipe** передаёт данные в **GStreamer**.
+- **GStreamer** использует `omxh264videoenc` (VPU) + `h264parse` + `mp4mux` + `filesink`.
+- **SPS/PPS** генерируются **GStreamer** автоматически.
+
+**Скрипт** `/root/ugv_rpi/vpu_record.sh`:
+```bash
+#!/bin/bash
+OUTPUT="$1"
+DURATION="${2:-0}"
+if [ -z "$OUTPUT" ]; then
+    echo "Usage: $0 <output_file> [duration_seconds]"
+    exit 1
+fi
+ffmpeg -f v4l2 -input_format mjpeg -video_size 1280x720 -i /dev/video0 \
+    -pix_fmt nv12 -f rawvideo -t "$DURATION" - 2>/dev/null | \
+gst-launch-1.0 -e fdsrc blocksize=1382400 ! \
+    videoparse width=1280 height=720 format=nv12 framerate=30/1 ! \
+    omxh264videoenc ! h264parse ! \
+    mp4mux ! filesink location="$OUTPUT" 2>/dev/null
+```
+**Использование:**
+
+```bash
+# Запись 10 секунд
+sudo /root/ugv_rpi/vpu_record.sh /tmp/test.mp4 10
+
+# Проверка
+ffprobe -v error -show_format /tmp/test.mp4
+# format_name=mov,mp4,m4a,3gp,3g2,mj2
+# duration=10.000000
+# size=2623745
+```
+**Результат:** валидный MP4 с H.264 (аппаратное кодирование через VPU).
+
+**Ограничение:** при записи через app.py — поток прерывается (камера освобождается для FFmpeg). 
+**Решение** — Этап 2 (GStreamer для всего).
 
 ## 🚧 Что осталось
 

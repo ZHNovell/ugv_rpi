@@ -7,9 +7,9 @@ import re
 import os
 
 # Пути к демо и модели
-DEMO_PATH = "/root/npu-files/zoo/examples/yolov5/build/yolov5_demo_a733"
-MODEL_PATH = "/root/npu-files/zoo/examples/yolov5/model/yolov5s_rt_uint8_a733.nb"
-LD_LIBRARY_PATH = "/root/npu-files/zoo/common/npuruntime/lib_linux_aarch64/A733"
+DEMO_PATH = "/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov5/build/yolov5_demo_a733"
+MODEL_PATH = "/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov5/model/yolov5s_rt_uint8_a733.nb"
+LD_LIBRARY_PATH = "/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733"
 
 # Классы COCO
 COCO_CLASSES = [

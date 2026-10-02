@@ -1,6 +1,8 @@
 # import base_ctrl library
 from base_ctrl import BaseController
 import threading
+import signal
+import sys
 import yaml, os
 
 # Orange Pi 4 Pro — UART7
@@ -56,6 +58,31 @@ pcs = set()
 
 # Camera funcs
 cvf = cv_ctrl.OpencvFuncs(thisPath, base)
+
+# Graceful shutdown handler for systemd (SIGTERM) and Ctrl+C (SIGINT)
+def cleanup_handler(signum, frame):
+    print(f"[app] Received signal {signum}, cleaning up...", flush=True)
+    try:
+        if hasattr(cvf, "camera") and cvf.camera:
+            cvf.camera.release()
+            print("[app] Camera released", flush=True)
+    except Exception as e:
+        print(f"[app] Camera release error: {e}", flush=True)
+    try:
+        if hasattr(cvf, "writer") and cvf.writer:
+            cvf.writer.release()
+            print("[app] Video writer released", flush=True)
+    except Exception as e:
+        print(f"[app] Writer release error: {e}", flush=True)
+    try:
+        cvf.cv_event.set()
+    except Exception:
+        pass
+    print("[app] Cleanup done, exiting", flush=True)
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, cleanup_handler)
+signal.signal(signal.SIGINT, cleanup_handler)
 
 cmd_actions = {
     f['code']['zoom_x1']: lambda: cvf.scale_ctrl(1),

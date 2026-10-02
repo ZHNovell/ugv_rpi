@@ -171,7 +171,7 @@ class OpencvFuncs():
 
         # usb camera init
         if self.usb_camera_connected:
-            self.camera = cv2.VideoCapture(0)
+            self.camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
             # Указываем MJPG для высокого FPS при высоком разрешении
             self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
             self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, f['video']['default_res_w'])
@@ -215,13 +215,22 @@ class OpencvFuncs():
 
 
     def frame_process(self):
+        # ПРОВЕРКА: если камера освобождена для VPU-записи — возвращаем заглушку
+        if self.camera is None:
+            import numpy as np
+            placeholder = 255 * np.ones((480, 640, 3), dtype=np.uint8)
+            cv2.putText(placeholder, "REC - stream paused",
+                        (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            ret, buffer = cv2.imencode('.jpg', placeholder, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
+            return buffer.tobytes()
+
         try:
             if self.usb_camera_connected:
                 success, input_frame = self.camera.read()
                 if not success:
                     self.camera.release()
                     time.sleep(1)
-                    self.camera = cv2.VideoCapture(0)
+                    self.camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
             elif self.csi_camera_connected:
                 input_frame = self.picam2.capture_array()
             elif self.oak_camera_connected:
@@ -293,25 +302,57 @@ class OpencvFuncs():
                 pass
 
         # record video (cv2.VideoWriter — надёжнее, чем imageio)
+        # ============ VPU H.264 Recording ============
         if not self.set_video_record_flag and not self.video_record_status_flag:
             pass
         elif self.set_video_record_flag and not self.video_record_status_flag:
+            # === START RECORDING ===
+            import subprocess, os
+
             current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             video_filename = f'{self.video_path}video_{current_time}.mp4'
-            h, w = input_frame.shape[:2]
-            self.writer = cv2.VideoWriter(
-                video_filename,
-                cv2.VideoWriter_fourcc(*'mp4v'),
-                30,
-                (w, h)
+            self.current_video_filename = video_filename
+
+            # Освобождаем камеру для FFmpeg
+            if self.camera:
+                self.camera.release()
+                self.camera = None
+                print("[cv_ctrl] Camera released for VPU recording")
+
+            # Запускаем VPU-запись
+            self.vpu_record_process = subprocess.Popen(
+                ['/root/ugv_rpi/vpu_record.sh', video_filename, '0'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
             )
+            print(f"[cv_ctrl] VPU recording started: {video_filename}")
             self.video_record_status_flag = True
+
         elif self.set_video_record_flag and self.video_record_status_flag:
+            # === RECORDING IN PROGRESS ===
             cv2.circle(input_frame, (15, 15), 5, (64, 64, 255), -1)
-            # Конвертируем BGRA → BGR (3 канала)
-            frame_to_write = cv2.cvtColor(input_frame, cv2.COLOR_BGRA2BGR)
-            self.writer.write(frame_to_write)
+            cv2.putText(input_frame, "REC - stream paused",
+                        (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
         elif not self.set_video_record_flag and self.video_record_status_flag:
+            # === STOP RECORDING ===
+            if hasattr(self, 'vpu_record_process') and self.vpu_record_process:
+                import signal
+                self.vpu_record_process.send_signal(signal.SIGINT)
+                try:
+                    self.vpu_record_process.wait(timeout=10)
+                except:
+                    self.vpu_record_process.kill()
+                print("[cv_ctrl] VPU recording stopped")
+
+            # Возобновляем камеру
+            self.camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
+            self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, f['video']['default_res_w'])
+            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, f['video']['default_res_h'])
+            self.camera.set(cv2.CAP_PROP_FPS, 30)
+            print("[cv_ctrl] Camera reinitialized")
+
             self.video_record_status_flag = False
             self.writer.release()
 
@@ -357,7 +398,7 @@ class OpencvFuncs():
         
         # 2. Надёжная проверка: пробуем открыть через OpenCV
         try:
-            cap = cv2.VideoCapture(0)
+            cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
             if cap.isOpened():
                 ret, frame = cap.read()
                 cap.release()

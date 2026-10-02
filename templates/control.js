@@ -240,7 +240,7 @@ function updateTimer() {
 $(document).ready(function () {
     $("#record-btn").click(function () {
         if (!isRecording) {
-            cmdSend(vid_sta,0,0);
+            sendCommand('base -c {"T":' + vid_sta + '}');
             $(this).css("color", "#FF8C8C");
             $(this).removeClass("video_btn_record");
             $(this).addClass("video_btn_stop");
@@ -248,7 +248,7 @@ $(document).ready(function () {
             $(this).text("00:00");
             timerInterval = setInterval(updateTimer, 1000);
         } else {
-            cmdSend(vid_end,0,0);
+            sendCommand('base -c {"T":' + vid_end + '}');
             $(this).removeClass("video_btn_stop");
             $(this).addClass("video_btn_record");
             $(this).text(originalText);
@@ -1188,7 +1188,7 @@ function readGamepad() {
       if(last_gp_record != gp.buttons[9].pressed){
         if (gp.buttons[9].pressed) {
             if (!isRecording) {
-                cmdSend(vid_sta,0,0);
+                sendCommand('base -c {"T":' + vid_sta + '}');
                 $(document).css("color", "#FF8C8C");
                 $(document).removeClass("video_btn_record");
                 $(document).addClass("video_btn_stop");
@@ -1196,7 +1196,7 @@ function readGamepad() {
                 $(document).text("00:00");
                 timerInterval = setInterval(updateTimer, 1000);
             } else {
-                cmdSend(vid_end,0,0);
+                sendCommand('base -c {"T":' + vid_end + '}');
                 $(document).removeClass("video_btn_stop");
                 $(document).addClass("video_btn_record");
                 $(document).text(originalText);

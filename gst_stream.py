@@ -4,7 +4,7 @@ gi.require_version('GstApp', '1.0')
 from gi.repository import Gst, GstApp
 import threading
 import time
-import os
+import numpy as np
 
 Gst.init(None)
 
@@ -29,9 +29,9 @@ class GstStream:
         pipeline_str = (
             f"v4l2src device={self.device} ! "
             f"image/jpeg,width={self.width},height={self.height},framerate={self.fps}/1 ! "
-            f"jpegdec ! videoconvert ! video/x-raw,format=NV12 ! "
+            f"jpegdec ! videoconvert ! video/x-raw,format=BGR ! "
             f"tee name=t "
-            f"t. ! queue ! videoconvert ! jpegenc ! "
+            f"t. ! queue ! "
             f"appsink name=appsink max-buffers=1 drop=true sync=false "
             f"t. ! queue ! fakesink"
         )
@@ -48,8 +48,10 @@ class GstStream:
                     buffer = sample.get_buffer()
                     success, map_info = buffer.map(Gst.MapFlags.READ)
                     if success:
+                        arr = np.frombuffer(map_info.data, dtype=np.uint8)
+                        arr = arr.reshape((self.height, self.width, 3)).copy()
                         with self.frame_lock:
-                            self.latest_frame = bytes(map_info.data)
+                            self.latest_frame = arr
                         buffer.unmap(map_info)
             except Exception as e:
                 print(f"[GstStream] pull error: {e}")
@@ -84,6 +86,7 @@ class GstStream:
             return
         print(f"[GstStream] Creating recording branch for {record_file}")
         queue = Gst.ElementFactory.make("queue", "rec_queue")
+        conv = Gst.ElementFactory.make("videoconvert", "rec_conv")
         encoder = Gst.ElementFactory.make("omxh264videoenc", "rec_encoder")
         parser = Gst.ElementFactory.make("h264parse", "rec_parser")
         muxer = Gst.ElementFactory.make("mp4mux", "rec_muxer")
@@ -91,13 +94,11 @@ class GstStream:
         sink.set_property("location", record_file)
 
         self.recording_branch = Gst.Bin.new("recording_branch")
-        self.recording_branch.add(queue)
-        self.recording_branch.add(encoder)
-        self.recording_branch.add(parser)
-        self.recording_branch.add(muxer)
-        self.recording_branch.add(sink)
+        for el in [queue, conv, encoder, parser, muxer, sink]:
+            self.recording_branch.add(el)
 
-        queue.link(encoder)
+        queue.link(conv)
+        conv.link(encoder)
         encoder.link(parser)
         parser.link(muxer)
         muxer.link(sink)
@@ -112,29 +113,21 @@ class GstStream:
 
         self.recording_branch.sync_state_with_parent()
         self.recording = True
-        print(f"[GstStream] Recording branch added and linked.")
+        print(f"[GstStream] Recording branch added.")
 
     def stop_recording(self):
         if not self.recording or not self.recording_branch:
             return
         print("[GstStream] Stopping recording branch...")
-
-        # 1. Отправляем EOS в ветку записи (чтобы mp4mux дописал moov atom)
         self.recording_branch.send_event(Gst.Event.new_eos())
-
-        # 2. Ждём EOS
         bus = self.pipeline.get_bus()
         bus.timed_pop_filtered(2 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
-
-        # 3. Отключаем pad
         ghost_pad = self.recording_branch.get_static_pad("sink")
         if ghost_pad:
             tee_pad = ghost_pad.get_peer()
             if tee_pad:
                 tee_pad.unlink(ghost_pad)
                 self.tee.release_request_pad(tee_pad)
-
-        # 4. Удаляем ветку
         self.recording_branch.set_state(Gst.State.NULL)
         self.pipeline.remove(self.recording_branch)
         self.recording_branch = None
@@ -145,12 +138,10 @@ class GstStream:
 if __name__ == '__main__':
     stream = GstStream()
     stream.start()
-    time.sleep(1)
-    print("Starting recording...")
-    stream.start_recording('/tmp/dynamic_record.mp4')
-    time.sleep(5)
-    print("Stopping recording...")
-    stream.stop_recording()
     time.sleep(2)
+    frame = stream.get_frame()
+    if frame is not None:
+        print(f"Frame shape: {frame.shape}, dtype: {frame.dtype}")
+    else:
+        print("No frame")
     stream.stop()
-    print("Done")

@@ -58,6 +58,7 @@ class OpencvFuncs():
         self.set_video_record_flag = False
         self.video_record_status_flag = False
         self.writer = None
+        self.gst_stream = None
         self.overlay = None
         self.scale_rate = 1
         self.video_quality = f['video']['default_quality']
@@ -169,14 +170,25 @@ class OpencvFuncs():
         self.csi_camera_connected = False
         self.oak_camera_connected = False
 
-        # usb camera init
+        # usb camera init via GstStream (VPU H.264 + MJPEG stream)
         if self.usb_camera_connected:
-            self.camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
-            # Указываем MJPG для высокого FPS при высоком разрешении
-            self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, f['video']['default_res_w'])
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, f['video']['default_res_h'])
-            self.camera.set(cv2.CAP_PROP_FPS, 30)
+            try:
+                from gst_stream import GstStream
+                self.gst_stream = GstStream(
+                    device='/dev/video0',
+                    width=f['video']['default_res_w'],
+                    height=f['video']['default_res_h'],
+                    fps=30
+                )
+                self.gst_stream.start()
+                print("[cv_ctrl] GstStream started for USB camera")
+            except Exception as e:
+                print(f"[cv_ctrl] GstStream failed: {e}, falling back to OpenCV")
+                self.camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
+                self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, f['video']['default_res_w'])
+                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, f['video']['default_res_h'])
+                self.camera.set(cv2.CAP_PROP_FPS, 30)
 
         # csi camera init (only if picamera2 is available)
         if not self.usb_camera_connected and CSI_CAMERA_AVAILABLE:
@@ -214,16 +226,98 @@ class OpencvFuncs():
                 self.oak_camera_connected = False
 
 
-    def frame_process(self):
-        # ПРОВЕРКА: если камера освобождена для VPU-записи — возвращаем заглушку
-        if self.camera is None:
+    def _process_frame_opencv(self, input_frame):
+        """Обработка кадра (overlay, OSD, imencode) — без чтения камеры."""
+        try:
+            # OpenCV funcs (overlay)
+            if self.cv_mode != f['code']['cv_none']:
+                if not self.cv_event.is_set():
+                    self.cv_event.set()
+                    self.opencv_threading(input_frame)
+                try:
+                    mask = self.overlay.astype(bool)
+                    input_frame[mask] = self.overlay[mask]
+                    cv2.addWeighted(self.overlay, 1, input_frame, 1, 0, input_frame)
+                except Exception as e:
+                    print(f"[cv_ctrl._process_frame_opencv] overlay error: {e}")
+            elif self.show_info_flag:
+                if time.time() - self.info_update_time > self.info_show_time:
+                    self.show_info_flag = False
+                self.overlay = input_frame.copy()
+                cv2.rectangle(self.overlay, (round((self.info_scale-0.005)*640), round((0.33)*480)),
+                                        (round(0.98*640), round((0.78)*480)),
+                                        self.info_bg_color, -1)
+                cv2.addWeighted(self.overlay, 0.5, input_frame, 0.5, 0, input_frame)
+                for i in range(0, len(self.info_deque)):
+                    cv2.putText(input_frame, str(self.info_deque[i]['text']),
+                                (round(self.info_scale*640), round(self.info_scale*640 - i * 20)),
+                                cv2.FONT_HERSHEY_SIMPLEX, self.info_deque[i]['size'], self.info_deque[i]['color'], 1)
+
+            if self.show_base_info_flag:
+                for i in range(0, len(self.recv_deque)):
+                    cv2.putText(input_frame, str(self.recv_deque[i]),
+                            (round(0.05*640), round(0.1*640 + i * 13)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.369, (255, 255, 255), 1)
+
+            # render osd
+            input_frame = self.osd_render(input_frame)
+
+            # capture frame (photo)
+            if self.picture_capture_flag:
+                current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                photo_filename = f'{self.photo_path}photo_{current_time}.jpg'
+                try:
+                    cv2.imwrite(photo_filename, input_frame)
+                    self.picture_capture_flag = False
+                    print(photo_filename)
+                except:
+                    pass
+
+            # frame scale (zoom)
+            if self.scale_rate != 1:
+                img_height, img_width = input_frame.shape[:2]
+                img_width_d2 = img_width/2
+                img_height_d2 = img_height/2
+                x_start = int(img_width_d2 - (img_width_d2//self.scale_rate))
+                x_end = int(img_width_d2 + (img_width_d2//self.scale_rate))
+                y_start = int(img_height_d2 - (img_height_d2//self.scale_rate))
+                y_end = int(img_height_d2 + (img_height_d2//self.scale_rate))
+                input_frame = input_frame[y_start:y_end, x_start:x_end]
+
+            # FPS count
+            self.fps_count += 1
+            if time.time() - self.fps_start_time >= 2:
+                self.video_fps = self.fps_count / 2
+                self.fps_count = 0
+                self.fps_start_time = time.time()
+
+            # encode frame to JPEG
+            ret, buffer = cv2.imencode('.jpg', input_frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.video_quality])
+            return buffer.tobytes()
+
+        except Exception as e:
+            print(f"[cv_ctrl._process_frame_opencv] error: {e}")
             import numpy as np
             placeholder = 255 * np.ones((480, 640, 3), dtype=np.uint8)
-            cv2.putText(placeholder, "REC - stream paused",
-                        (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             ret, buffer = cv2.imencode('.jpg', placeholder, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
             return buffer.tobytes()
 
+    def frame_process(self):
+        # ============ GstStream (VPU H.264 + MJPEG stream) ============
+        if self.gst_stream is not None:
+            input_frame = self.gst_stream.get_frame()
+            if input_frame is None:
+                # Первый кадр ещё не пришёл — заглушка
+                import numpy as np
+                placeholder = 255 * np.ones((720, 1280, 3), dtype=np.uint8)
+                cv2.putText(placeholder, "Waiting for first frame...",
+                            (400, 360), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+                ret, buffer = cv2.imencode('.jpg', placeholder, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
+                return buffer.tobytes()
+            # Дальше — стандартная обработка (overlay, OSD, imencode)
+            return self._process_frame_opencv(input_frame)
+
+        # ============ Fallback: OpenCV (старая логика) ============
         try:
             if self.usb_camera_connected:
                 success, input_frame = self.camera.read()
@@ -301,49 +395,39 @@ class OpencvFuncs():
             except:
                 pass
 
-        # record video (cv2.VideoWriter — надёжнее, чем imageio)
-        # ============ VPU H.264 Recording ============
+        # ============ VPU H.264 Recording (via GstStream) ============
         if not self.set_video_record_flag and not self.video_record_status_flag:
             pass
         elif self.set_video_record_flag and not self.video_record_status_flag:
             # === START RECORDING ===
-            import subprocess, os
-
-            current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            video_filename = f'{self.video_path}video_{current_time}.mp4'
-            self.current_video_filename = video_filename
-
-            # Освобождаем камеру для FFmpeg
-            if self.camera:
-                self.camera.release()
-                self.camera = None
-                print("[cv_ctrl] Camera released for VPU recording")
-
-            # Запускаем VPU-запись
-            self.vpu_record_process = subprocess.Popen(
-                ['/root/ugv_rpi/vpu_record.sh', video_filename, '0'],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            print(f"[cv_ctrl] VPU recording started: {video_filename}")
-            self.video_record_status_flag = True
+            if self.gst_stream is not None:
+                current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                video_filename = f'{self.video_path}video_{current_time}.mp4'
+                self.current_video_filename = video_filename
+                try:
+                    self.gst_stream.start_recording(video_filename)
+                    self.video_record_status_flag = True
+                    print(f"[cv_ctrl] GstStream recording started: {video_filename}")
+                except Exception as e:
+                    print(f"[cv_ctrl] GstStream recording error: {e}")
+            else:
+                print("[cv_ctrl] GstStream not available, recording disabled")
 
         elif self.set_video_record_flag and self.video_record_status_flag:
             # === RECORDING IN PROGRESS ===
             cv2.circle(input_frame, (15, 15), 5, (64, 64, 255), -1)
-            cv2.putText(input_frame, "REC - stream paused",
+            cv2.putText(input_frame, "REC",
                         (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
         elif not self.set_video_record_flag and self.video_record_status_flag:
             # === STOP RECORDING ===
-            if hasattr(self, 'vpu_record_process') and self.vpu_record_process:
-                import signal
-                self.vpu_record_process.send_signal(signal.SIGINT)
+            if self.gst_stream is not None:
                 try:
-                    self.vpu_record_process.wait(timeout=10)
-                except:
-                    self.vpu_record_process.kill()
-                print("[cv_ctrl] VPU recording stopped")
+                    self.gst_stream.stop_recording()
+                    print("[cv_ctrl] GstStream recording stopped")
+                except Exception as e:
+                    print(f"[cv_ctrl] GstStream stop error: {e}")
+            self.video_record_status_flag = False
 
             # Возобновляем камеру
             self.camera = cv2.VideoCapture(0, cv2.CAP_V4L2)

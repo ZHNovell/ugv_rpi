@@ -170,8 +170,8 @@ function showVideosTips(){
 
 //update videos list
 function generateVideoLink(vname) {
-    var strippedname = vname.replace("video_", "").replace(".mp4", "");
-    var videoList = '<li><a target="_blank" data-filename="' + vname + '" href="./videos/' + vname +'">';
+    var strippedname = vname.replace("video_", "").replace(/\.(mp4|avi|mkv)$/, "");
+    var videoList = '<li><a target="_blank" download data-filename="' + vname + '" href="./videos/' + vname +'">';
     videoList += '<p>' + strippedname + '</p>';
     videoList += '<div><div class="delete_btn_size normal_btn_play btn_ico"></div></div></a>';
     videoList += '<div class="delete_btn"><div class="delete_btn_size normal_btn_del btn_ico"></div></div></li>';

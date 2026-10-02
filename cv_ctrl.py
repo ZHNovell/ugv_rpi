@@ -226,6 +226,46 @@ class OpencvFuncs():
                 self.oak_camera_connected = False
 
 
+    def _handle_recording(self, input_frame):
+        """Обработка флагов записи видео. Вызывается на каждом кадре из _process_frame_opencv."""
+        try:
+            if not self.set_video_record_flag and not self.video_record_status_flag:
+                return
+
+            if self.set_video_record_flag and not self.video_record_status_flag:
+                # START RECORDING
+                if self.gst_stream is not None:
+                    current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                    video_filename = f'{self.video_path}video_{current_time}.mkv'
+                    self.current_video_filename = video_filename
+                    try:
+                        self.gst_stream.start_recording(video_filename)
+                        self.video_record_status_flag = True
+                        print(f"[cv_ctrl] GstStream recording started: {video_filename}", flush=True)
+                    except Exception as e:
+                        print(f"[cv_ctrl] GstStream recording error: {e}", flush=True)
+                else:
+                    print("[cv_ctrl] GstStream not available, recording disabled", flush=True)
+
+            elif self.set_video_record_flag and self.video_record_status_flag:
+                # RECORDING IN PROGRESS — just draw REC indicator
+                cv2.circle(input_frame, (15, 15), 5, (64, 64, 255), -1)
+                cv2.putText(input_frame, "REC",
+                            (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+            elif not self.set_video_record_flag and self.video_record_status_flag:
+                # STOP RECORDING
+                if self.gst_stream is not None:
+                    try:
+                        self.gst_stream.stop_recording()
+                        print("[cv_ctrl] GstStream recording stopped", flush=True)
+                    except Exception as e:
+                        print(f"[cv_ctrl] GstStream stop error: {e}", flush=True)
+                self.video_record_status_flag = False
+        except Exception as e:
+            print(f"[cv_ctrl._handle_recording] error: {e}", flush=True)
+
+
     def _process_frame_opencv(self, input_frame):
         """Обработка кадра (overlay, OSD, imencode) — без чтения камеры."""
         try:
@@ -284,12 +324,8 @@ class OpencvFuncs():
                 y_end = int(img_height_d2 + (img_height_d2//self.scale_rate))
                 input_frame = input_frame[y_start:y_end, x_start:x_end]
 
-            # FPS count
-            self.fps_count += 1
-            if time.time() - self.fps_start_time >= 2:
-                self.video_fps = self.fps_count / 2
-                self.fps_count = 0
-                self.fps_start_time = time.time()
+            # handle video recording (start/stop/REC indicator)
+            self._handle_recording(input_frame)
 
             # encode frame to JPEG
             ret, buffer = cv2.imencode('.jpg', input_frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.video_quality])
@@ -304,6 +340,13 @@ class OpencvFuncs():
 
     def frame_process(self):
         # ============ GstStream (VPU H.264 + MJPEG stream) ============
+        # FPS count
+        self.fps_count += 1
+        if time.time() - self.fps_start_time >= 2:
+            self.video_fps = self.fps_count / 2
+            self.fps_count = 0
+            self.fps_start_time = time.time()
+
         if self.gst_stream is not None:
             input_frame = self.gst_stream.get_frame()
             if input_frame is None:
@@ -396,20 +439,28 @@ class OpencvFuncs():
                 pass
 
         # ============ VPU H.264 Recording (via GstStream) ============
+        # DEBUG: log flags on change
+        if not hasattr(self, '_dbg_last_flags'):
+            self._dbg_last_flags = None
+        cur_flags = (self.set_video_record_flag, self.video_record_status_flag)
+        if cur_flags != self._dbg_last_flags:
+            print(f"[cv_ctrl] frame_process flags changed: set={self.set_video_record_flag} status={self.video_record_status_flag}", flush=True)
+            self._dbg_last_flags = cur_flags
+
         if not self.set_video_record_flag and not self.video_record_status_flag:
             pass
         elif self.set_video_record_flag and not self.video_record_status_flag:
             # === START RECORDING ===
             if self.gst_stream is not None:
                 current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                video_filename = f'{self.video_path}video_{current_time}.mp4'
+                video_filename = f'{self.video_path}video_{current_time}.mkv'
                 self.current_video_filename = video_filename
                 try:
                     self.gst_stream.start_recording(video_filename)
                     self.video_record_status_flag = True
-                    print(f"[cv_ctrl] GstStream recording started: {video_filename}")
+                    print(f"[cv_ctrl] GstStream recording started: {video_filename}", flush=True)
                 except Exception as e:
-                    print(f"[cv_ctrl] GstStream recording error: {e}")
+                    print(f"[cv_ctrl] GstStream recording error: {e}", flush=True)
             else:
                 print("[cv_ctrl] GstStream not available, recording disabled")
 
@@ -424,7 +475,7 @@ class OpencvFuncs():
             if self.gst_stream is not None:
                 try:
                     self.gst_stream.stop_recording()
-                    print("[cv_ctrl] GstStream recording stopped")
+                    print("[cv_ctrl] GstStream recording stopped", flush=True)
                 except Exception as e:
                     print(f"[cv_ctrl] GstStream stop error: {e}")
             self.video_record_status_flag = False
@@ -460,12 +511,6 @@ class OpencvFuncs():
         except:
             pass
 
-        # get fps
-        self.fps_count += 1
-        if time.time() - self.fps_start_time >= 2:
-            self.video_fps = self.fps_count/2
-            self.fps_count = 0
-            self.fps_start_time = time.time()
 
         # output frame
         return input_frame
@@ -530,6 +575,7 @@ class OpencvFuncs():
         self.picture_capture_flag = True
 
     def video_record(self, input_cmd):
+        print(f"[cv_ctrl] video_record called with {input_cmd}", flush=True)
         if input_cmd:
             self.set_video_record_flag = True
         else:

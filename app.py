@@ -146,14 +146,22 @@ def process_cv_info(cmd):
 
 # Function to generate video frames from the camera
 def generate_frames():
+    last_t = time.time()
+    target_dt = 1.0 / 30.0  # 30 FPS cap
     while True:
         frame = cvf.frame_process()
         # print(cvf.cv_info())
         try:
             yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n') 
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
         except Exception as e:
             print("An [generate_frames] error occurred:", e)
+        # cap MJPEG stream to camera speed (30 FPS) so FPS counter matches reality
+        now = time.time()
+        dt = now - last_t
+        if dt < target_dt:
+            time.sleep(target_dt - dt)
+        last_t = time.time()
 
 
 
@@ -199,7 +207,7 @@ def videos(filename):
 @app.route('/get_video_names')
 def get_video_names():
     video_files = sorted(
-        [filename for filename in os.listdir(thisPath + '/templates/videos/') if filename.endswith('.mp4')],
+        [filename for filename in os.listdir(thisPath + '/templates/videos/') if filename.endswith(('.mp4', '.avi', '.mkv'))],
         key=lambda filename: os.path.getctime(os.path.join(thisPath + '/templates/videos/', filename)),
         reverse=True
     )

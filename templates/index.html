@@ -37,6 +37,7 @@
                                             <p><span>RSSI: </span><span id="rssi">0</span></p>
                                             <p><span>FPS: </span><span id="fps">0</span></p>
                                             <p><span>TEMP: </span><span id="tem">0</span></p>
+                                            <p><span>RES: </span><span id="res_mode">1080p30</span></p>
                                         </div>
                                     </div>
                                 </div>
@@ -93,7 +94,7 @@
                         <div class="views">
                             <div><button class="normal_btn normal_btn_size video_btn_zoom btn_ico" id="zoom_btn"></button></div>
                             <div class="video_btn_px_select">
-                                <button id="video_pixel_btn" class="normal_btn normal_btn_size video_btn_px">WebRTC</button>
+                                <button id="video_pixel_btn" class="normal_btn normal_btn_size video_btn_px" onclick="toggleCameraMode();">WebRTC</button>
                                 <ul id="video_pixel_btn_list">
                                     <!-- <li class="normal_btn" onclick="cmdSend(max_res,2,0);">960P</li>
                                     <li class="normal_btn" onclick="cmdSend(mid_res,1,0);">480P</li>
@@ -325,7 +326,7 @@
         <div style="background-image: url('./img/grey/delete.svg');"></div>
     </footer>
     <!-- <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script> -->
-    <script src="./control.js?v=2"></script>
+    <script src="./control.js?v=4"></script>
     <script src="./main.js"></script>
 </body>
 </html>

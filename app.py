@@ -92,6 +92,7 @@ cmd_actions = {
     f['code']['pic_cap']: cvf.picture_capture,
     f['code']['vid_sta']: lambda: cvf.video_record(True),
     f['code']['vid_end']: lambda: cvf.video_record(False),
+    f['code']['cam_toggle']: cvf.toggle_camera_mode,
 
     f['code']['cv_none']: lambda: cvf.set_cv_mode(f['code']['cv_none']),
     f['code']['cv_moti']: lambda: cvf.set_cv_mode(f['code']['cv_moti']),
@@ -147,7 +148,6 @@ def process_cv_info(cmd):
 # Function to generate video frames from the camera
 def generate_frames():
     last_t = time.time()
-    target_dt = 1.0 / 30.0  # 30 FPS cap
     while True:
         frame = cvf.frame_process()
         # print(cvf.cv_info())
@@ -156,7 +156,9 @@ def generate_frames():
                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
         except Exception as e:
             print("An [generate_frames] error occurred:", e)
-        # cap MJPEG stream to camera speed (30 FPS) so FPS counter matches reality
+        # cap MJPEG stream to current camera mode (30 or 60 FPS)
+        target_fps = 60.0 if getattr(cvf, 'camera_mode', '1080p30') == '720p60' else 30.0
+        target_dt = 1.0 / target_fps
         now = time.time()
         dt = now - last_t
         if dt < target_dt:
@@ -538,7 +540,8 @@ def update_data_websocket_single():
             f['fb'][f'base_voltage']:base.base_data['v'] if base.base_data else 0,
             f['fb']['video_fps']:   cvf.video_fps,
             f['fb']['cv_movtion_mode']: cvf.cv_movtion_lock,
-            f['fb']['base_light']:  base.base_light_status
+            f['fb']['base_light']:  base.base_light_status,
+            f['fb']['camera_mode']: '1' if getattr(cvf, 'camera_mode', '1080p30') == '720p60' else '0'
         }
         socketio.emit('update', socket_data, namespace='/ctrl')
     except Exception as e:

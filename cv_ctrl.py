@@ -59,6 +59,7 @@ class OpencvFuncs():
         self.video_record_status_flag = False
         self.writer = None
         self.gst_stream = None
+        self.camera_mode = '1080p30'  # current camera mode
         self.overlay = None
         self.scale_rate = 1
         self.video_quality = f['video']['default_quality']
@@ -573,6 +574,26 @@ class OpencvFuncs():
 
     def picture_capture(self):
         self.picture_capture_flag = True
+
+    def toggle_camera_mode(self):
+        """Switch camera between 1080p30 and 720p60."""
+        if self.gst_stream is None:
+            print("[cv_ctrl] gst_stream not available, cannot switch mode", flush=True)
+            return
+        if self.video_record_status_flag:
+            print("[cv_ctrl] cannot switch camera while recording", flush=True)
+            return
+        if self.camera_mode == '1080p30':
+            new_w, new_h, new_fps = 1280, 720, 60
+            self.camera_mode = '720p60'
+        else:
+            new_w, new_h, new_fps = 1920, 1080, 30
+            self.camera_mode = '1080p30'
+        print(f"[cv_ctrl] toggle_camera_mode -> {self.camera_mode}", flush=True)
+        try:
+            self.gst_stream.switch_mode(new_w, new_h, new_fps)
+        except Exception as e:
+            print(f"[cv_ctrl] switch_mode error: {e}", flush=True)
 
     def video_record(self, input_cmd):
         print(f"[cv_ctrl] video_record called with {input_cmd}", flush=True)

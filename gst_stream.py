@@ -102,6 +102,19 @@ class GstStream:
         self.running = False
         print("[GstStream] Stopped")
 
+    def switch_mode(self, width, height, fps):
+        """Restart pipeline with new width/height/fps. Viewing briefly interrupts (~0.5s)."""
+        print(f"[GstStream] switching to {width}x{height}@{fps}", flush=True)
+        was_running = self.running
+        if self.running:
+            self.stop()
+        self.width = width
+        self.height = height
+        self.fps = fps
+        if was_running:
+            time.sleep(0.3)
+            self.start()
+
     # ---------- recording ----------
     def start_recording(self, path):
         """Dynamically add a recording branch to the live pipeline.

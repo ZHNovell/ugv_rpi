@@ -3,7 +3,7 @@ var cmd_gimbal_ctrl, cmd_gimbal_steady, cmd_arm_ctrl_ui;
 var max_rate, mid_rate, min_rate, arm_default_e, arm_default_r, arm_default_z; 
 var max_res, mid_res, min_res; 
 var zoom_x1, zoom_x2, zoom_x4;
-var pic_cap, vid_sta, vid_end;
+var pic_cap, vid_sta, vid_end, cam_toggle;
 var mc_lock, mc_unlo;
 var cv_none, cv_moti, cv_face, cv_objs, cv_clor, mp_hand, cv_auto;
 var mp_face, mp_pose;
@@ -13,7 +13,7 @@ var s_panid, release, set_mid, s_tilid;
 var armZ, armR, armE;
 
 var detect_type, led_mode, detect_react, picture_size, video_size, cpu_load;
-var cpu_temp, ram_usage, pan_angle, tilt_angle, wifi_rssi, base_voltage, video_fps;
+var cpu_temp, ram_usage, pan_angle, tilt_angle, wifi_rssi, base_voltage, video_fps, camera_mode;
 var cv_movtion_mode, base_light;
 
 fetch('/config')
@@ -55,6 +55,7 @@ fetch('/config')
       pic_cap = yamlObject.code.pic_cap;
       vid_sta = yamlObject.code.vid_sta;
       vid_end = yamlObject.code.vid_end;
+      cam_toggle = yamlObject.code.cam_toggle;
 
       mc_lock = yamlObject.code.mc_lock;
       mc_unlo = yamlObject.code.mc_unlo;
@@ -98,6 +99,7 @@ fetch('/config')
       wifi_rssi   = yamlObject.fb.wifi_rssi;
       base_voltage= yamlObject.fb.base_voltage;
       video_fps   = yamlObject.fb.video_fps;
+      camera_mode = yamlObject.fb.camera_mode;
       cv_movtion_mode = yamlObject.fb.cv_movtion_mode;
       base_light  = yamlObject.fb.base_light;
 
@@ -595,6 +597,14 @@ var cv_heartbeat_stop_flag = false;
 socket.on('update', function(data) {
     // Убрана проверка base_voltage — она блокировала OSD без ESP32
     try {
+        // update camera mode indicator (RES)
+        try {
+            var resEl = document.getElementById("res_mode");
+            if (resEl && typeof camera_mode !== 'undefined' && data[camera_mode] !== undefined) {
+                resEl.innerHTML = (data[camera_mode] == '1') ? '720p60' : '1080p30';
+            }
+        } catch (e) { /* ignore */ }
+
         var baseBtn = document.getElementById("base_led_ctrl_btn");
         var BButtons = baseBtn.getElementsByTagName("button");
         removeButtonsClass(BButtons);
@@ -772,6 +782,20 @@ function sendCmdClor() {
 
 function sendCmdHand() {
     sendCommand('base -c {"T":' + mp_hand + '}');
+}
+
+function toggleCameraMode() {
+    if (typeof cam_toggle === 'undefined' || cam_toggle === null) {
+        console.warn('cam_toggle not loaded yet');
+        return;
+    }
+    console.log('toggleCameraMode: sending T=' + cam_toggle);
+    sendCommand('base -c {"T":' + cam_toggle + '}');
+    // визуальная индикация нажатия
+    var btn = document.getElementById('video_pixel_btn');
+    if (btn) {
+        btn.classList.toggle('ctl_btn_active');
+    }
 }
 
 function sendCommand(command) {

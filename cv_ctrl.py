@@ -341,13 +341,7 @@ class OpencvFuncs():
 
     def frame_process(self):
         # ============ GstStream (VPU H.264 + MJPEG stream) ============
-        # FPS count
-        self.fps_count += 1
-        if time.time() - self.fps_start_time >= 2:
-            self.video_fps = self.fps_count / 2
-            self.fps_count = 0
-            self.fps_start_time = time.time()
-
+        # FPS is now counted in app.py generate_frames() based on actual yields
         if self.gst_stream is not None:
             input_frame = self.gst_stream.get_frame()
             if input_frame is None:

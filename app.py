@@ -148,22 +148,33 @@ def process_cv_info(cmd):
 # Function to generate video frames from the camera
 def generate_frames():
     last_t = time.time()
+    fps_start = time.time()
+    fps_frames = 0
     while True:
         frame = cvf.frame_process()
         # print(cvf.cv_info())
         try:
             yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            fps_frames += 1
         except Exception as e:
             print("An [generate_frames] error occurred:", e)
+        # update cvf.video_fps every 2s based on actual yielded frames
+        now_check = time.time()
+        if now_check - fps_start >= 2.0:
+            cvf.video_fps = fps_frames / (now_check - fps_start)
+            fps_start = now_check
+            fps_frames = 0
         # cap MJPEG stream to current camera mode (30 or 60 FPS)
         target_fps = 60.0 if getattr(cvf, 'camera_mode', '1080p30') == '720p60' else 30.0
         target_dt = 1.0 / target_fps
+        last_t += target_dt
         now = time.time()
-        dt = now - last_t
-        if dt < target_dt:
-            time.sleep(target_dt - dt)
-        last_t = time.time()
+        dt = last_t - now
+        if dt > 0:
+            time.sleep(dt)
+        else:
+            last_t = now
 
 
 

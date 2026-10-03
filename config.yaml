@@ -48,7 +48,7 @@ code:
   mc_lock: 10501
   mc_unlo: 10502
   mid_res: 10102
-  cam_toggle: 10104
+  cam_toggle: 10107
   min_res: 10103
   mp_face: 10308
   mp_hand: 10306

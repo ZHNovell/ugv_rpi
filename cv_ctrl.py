@@ -47,6 +47,8 @@ class OpencvFuncs():
         self.base_ctrl = base_ctrl
         self.cv_event = threading.Event()
         self.cv_event.clear()
+        self.cv_frame_counter = 0
+        self.cv_run_every_n = 3  # run NPU/CV detection once per N frames
         self.cv_mode = f['code'][f'cv_none']
         self.detection_reaction_mode = f['code']['re_none']
         
@@ -272,7 +274,9 @@ class OpencvFuncs():
         try:
             # OpenCV funcs (overlay)
             if self.cv_mode != f['code']['cv_none']:
-                if not self.cv_event.is_set():
+                self.cv_frame_counter += 1
+                if (self.cv_frame_counter >= self.cv_run_every_n) and (not self.cv_event.is_set()):
+                    self.cv_frame_counter = 0
                     self.cv_event.set()
                     self.opencv_threading(input_frame)
                 try:
@@ -323,7 +327,9 @@ class OpencvFuncs():
                 x_end = int(img_width_d2 + (img_width_d2//self.scale_rate))
                 y_start = int(img_height_d2 - (img_height_d2//self.scale_rate))
                 y_end = int(img_height_d2 + (img_height_d2//self.scale_rate))
-                input_frame = input_frame[y_start:y_end, x_start:x_end]
+                cropped = input_frame[y_start:y_end, x_start:x_end]
+                # resize back to original size so CSS object-fit:contain doesn't compensate
+                input_frame = cv2.resize(cropped, (img_width, img_height), interpolation=cv2.INTER_LINEAR)
 
             # handle video recording (start/stop/REC indicator)
             self._handle_recording(input_frame)

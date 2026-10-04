@@ -1178,6 +1178,76 @@ ffprobe -v error -show_format /tmp/test.mp4
 - ✅ **Запись видео** работает в обоих режимах (файл .mkv, 720p, 60 fps реальных).
 - ✅ **FPS в OSD** меняется (30 ↔ 57-60).
 
+## 🆕 Обновления (2026-10-0): Конвертация моделей YOLOv9 для NPU Allwinner A733 (FP16)
+
+**Проблема:** При стандартной INT8-квантовании через Acuity Toolkit модель выдавала некорректные результаты (68+ детекций с вероятностью ~50% для всего подряд). 
+**Диагностика:** Анализ гистограммы выходных данных показал, что 82% значений застряли в диапазоне `[0..15]` (INT8). Это произошло из-за того, что конвертер автоматически склеивал два выхода ONNX (`bbox` и `scores`) в один тензор и применял к ним общую, некорректную математику масштабирования (scale/zero_point) без калибровочного датасета.
+**Решение:** Переход на формат **FP16** (полуточность). Это полностью исключает искажения INT8-квантования, сохраняя исходную точность ONNX-модели. Размер модели увеличивается незначительно (до ~15-25 МБ), а скорость на NPU A733 остается высокой.
+
+#### 🛠 Алгоритм конвертации (отлаженный пайплайн)
+
+**1. Подготовка ONNX (Гостевая ОС Ubuntu VirtualBox):**
+Скачиваем официальные репараметризованные веса и экспортируем в ONNX с упрощением графа:
+```bash
+cd /home/user/yolov9
+source yolovenv/bin/activate
+
+# Для YOLOv9-tiny (320x320 или 640x640)
+wget -O yolov9-t-converted.pt https://github.com/WongKinYiu/yolov9/releases/download/v0.1/yolov9-t-converted.pt
+python3 export.py --weights ./yolov9-t-converted.pt --img-size 640 640 --batch-size 1 --include onnx --simplify
+
+# Для YOLOv9-small (640x640)
+wget -O yolov9-s-converted.pt https://github.com/WongKinYiu/yolov9/releases/download/v0.1/yolov9-s-converted.pt
+python3 export.py --weights ./yolov9-s-converted.pt --img-size 640 640 --batch-size 1 --include onnx --simplify
+```
+**2. Конвертация в Docker (Образ ubuntu-npu:v2.0.10.2):**
+Важно: Образ содержит баг в путях к библиотекам для финальной компиляции C-кода. Перед запуском pegasus.py необходимо создать символические ссылки (workaround):
+```bash
+# Внутри контейнера Docker:
+# 1. Ссылка на папку с .so библиотеками
+ln -s /root/Vivante_IDE/VivanteIDE5.11.0/cmdtools/vsimulator/lib /root/Vivante_IDE/VivanteIDE5.11.0/prebuilt-sdk/x86_64_linux/lib
+
+# 2. Ссылки на отсутствующие библиотеки линковщика
+mkdir -p /root/Vivante_IDE/VivanteIDE5.11.0/prebuilt-sdk/common/lib
+ln -s /root/Vivante_IDE/VivanteIDE5.11.0/cmdtools/common/lib/libjpeg.a /root/Vivante_IDE/VivanteIDE5.11.0/prebuilt-sdk/common/lib/libjpeg.a
+ln -s /root/Vivante_IDE/VivanteIDE5.11.0/cmdtools/common/lib/libvdtproxy.so /root/Vivante_IDE/VivanteIDE5.11.0/cmdtools/vsimulator/lib/libvdtproxy.so
+```
+**3. Импорт и Экспорт (внутри Docker):**
+Создаем файл метаданных входа (input_meta_640.yaml для 640x640 или input_meta_320.yaml для 320x320):
+```yaml
+images:
+  shape: [1, 3, 640, 640] # или [1, 3, 320, 320]
+  format: "rgb"
+  mean_value: [0, 0, 0]
+  std_value: [1.0, 1.0, 1.0]
+```
+Запускаем конвертацию (пример для YOLOv9-s):
+```bash
+# Импорт
+python3 /root/acuity-toolkit-whl-6.30.22/bin/pegasus.py import onnx \
+    --model yolov9-s-converted.onnx \
+    --output-model yolov9s_acuity.json \
+    --output-data yolov9s_acuity.data
+
+# Экспорт в NBG (FP16) для чипа A733 (VIP9000NANODI_PLUS)
+python3 /root/acuity-toolkit-whl-6.30.22/bin/pegasus.py export ovxlib \
+    --model yolov9s_acuity.json \
+    --model-data yolov9s_acuity.data \
+    --output-path yolov9s_fp16.nb \
+    --dtype float16 \
+    --optimize VIP9000NANODI_PLUS_PID0X1000003B \
+    --pack-nbg-unify \
+    --viv-sdk /root/Vivante_IDE/VivanteIDE5.11.0 \
+    --with-input-meta input_meta_640.yaml
+```
+**4. Извлечение результата:**
+Готовый файл network_binary.nb появляется в папке /workspace/yolov9_nbg_unify/. Копируем его в примонтированную папку для передачи на хост-машину:
+```bash
+cp /workspace/yolov9_nbg_unify/network_binary.nb /workspace/yolov9/yolov9s_fp16.nb
+# Затем в гостевой Ubuntu: cp /home/user/yolov9/yolov9s_fp16.nb /media/sf_orangepi-build/
+```
+
+
 
 ## 🚧 Что осталось
 

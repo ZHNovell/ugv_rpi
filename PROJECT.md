@@ -1246,9 +1246,57 @@ python3 /root/acuity-toolkit-whl-6.30.22/bin/pegasus.py export ovxlib \
 cp /workspace/yolov9_nbg_unify/network_binary.nb /workspace/yolov9/yolov9s_fp16.nb
 # Затем в гостевой Ubuntu: cp /home/user/yolov9/yolov9s_fp16.nb /media/sf_orangepi-build/
 ```
+**4. Запускаем диагностику для самой быстрой модели (Tiny 320x320):**
 
+```bash
+cd /root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov8/build
 
+LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733 \
+./yolov8_demo_a733 -nb /root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov5/model/yolov9t_320_fp16.nb \
+-i /root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov8/model/dog.jpg \
+-l 1 -m 10
+```
+**Результат:**
+```text
+=== FP16 МОДЕЛЬ ДИАГНОСТИКА (YOLOv9-tiny 320x320) ===
+Total elements: 176400
+Min: -48, Max: 372, Mean: 4.70434
+Гистограмма распределения значений:
+  [-10.0 .. -5.0): 0
+  [ -5.0 .. -1.0): 3  <-- Logits (отрицательные)
+  [ -1.0 ..  0.0): 1
+  [  0.0 ..  0.5): 166942  <-- Вероятности (низкие)
+  [  0.5 ..  1.0): 37  <-- Вероятности (высокие)
+  [  1.0 ..  5.0): 1128  <-- Координаты (малые)
+  [  5.0 .. 50.0): 3806  <-- Координаты (средние)
+  [ 50.0 .. +inf): 4480  <-- Координаты (большие)
 
+=== ПЕРВЫЕ 10 БОКСОВ (cx, cy, w, h) ===
+Box 0: cx=8, cy=11.5781, w=24, h=28.2344
+Box 1: cx=40, cy=40, w=60, h=60
+Box 2: cx=72, cy=104, w=88, h=92
+Box 3: cx=128, cy=108, w=112, h=124
+Box 4: cx=164, cy=144, w=148, h=156
+Box 5: cx=164, cy=168, w=184, h=188
+Box 6: cx=192, cy=236, w=220, h=220
+Box 7: cx=228, cy=236, w=244, h=248
+Box 8: cx=256, cy=268, w=272, h=284
+Box 9: cx=288.5, cy=352, w=340, h=312
+
+=== ПЕРВЫЕ 10 ВЕРОЯТНОСТЕЙ (первые 3 класса) ===
+Box 0: cls0=24, cls1=44, cls2=60
+Box 1: cls0=72, cls1=80, cls2=116
+Box 2: cls0=100, cls1=104, cls2=112
+Box 3: cls0=128, cls1=140, cls2=148
+Box 4: cls0=168, cls1=172, cls2=176
+Box 5: cls0=230.75, cls1=232, cls2=212
+Box 6: cls0=228, cls1=236, cls2=272
+Box 7: cls0=256, cls1=279.25, cls2=272
+Box 8: cls0=288, cls1=336, cls2=312
+Box 9: cls0=8, cls1=-4, cls2=20
+destory npu finished.
+~NpuUint.
+```
 ## 🚧 Что осталось
 
 ### Ближайшее

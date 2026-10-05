@@ -30,3 +30,17 @@ output_yolov5.png
 # Медиа (фото/видео)
 templates/pictures/
 templates/videos/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Build artifacts
+yolo11/build_test/
+yolo11/build/
+yolo11/install/
+
+# Test outputs
+out_yolo11.png
+*.nb.bak

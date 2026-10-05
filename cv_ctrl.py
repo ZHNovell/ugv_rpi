@@ -49,6 +49,12 @@ class OpencvFuncs():
         self.cv_event.clear()
         self.cv_frame_counter = 0
         self.cv_run_every_n = 3  # run NPU/CV detection once per N frames
+
+        # Async NPU worker (для cv_objs — YOLO11s без блокировки главного потока)
+        self.npu_thread = None
+        self.npu_stop_flag = False
+        self.npu_latest_frame = None
+        self.npu_frame_lock = threading.Lock()
         self.cv_mode = f['code'][f'cv_none']
         self.detection_reaction_mode = f['code']['re_none']
         
@@ -107,9 +113,9 @@ class OpencvFuncs():
             self.color_upper = np.array(f['cv']['color_upper'])
         self.track_color_iterate = f['cv']['track_color_iterate']
 
-        # NPU YOLOv5s (через Python-обёртку)
-        import yolov5_npu
-        self.yolov5_npu = yolov5_npu
+        # NPU YOLO11s (через Python-обёртку)
+        from npu_client import NPUClient
+        self.npu_client = NPUClient()
         self.npu_temp_path = "/tmp/yolo_input.jpg"
 
         # mediapipe (only if available)
@@ -274,15 +280,25 @@ class OpencvFuncs():
         try:
             # OpenCV funcs (overlay)
             if self.cv_mode != f['code']['cv_none']:
-                self.cv_frame_counter += 1
-                if (self.cv_frame_counter >= self.cv_run_every_n) and (not self.cv_event.is_set()):
-                    self.cv_frame_counter = 0
-                    self.cv_event.set()
-                    self.opencv_threading(input_frame)
+                if self.cv_mode == f['code']['cv_objs']:
+                    # cv_objs: YOLO11s работает в асинхронном потоке.
+                    # Главный поток только отдаёт свежий кадр и накладывает overlay.
+                    with self.npu_frame_lock:
+                        self.npu_latest_frame = input_frame.copy()
+                else:
+                    # Остальные CV-режимы — как раньше (в отдельном потоке)
+                    self.cv_frame_counter += 1
+                    if (self.cv_frame_counter >= self.cv_run_every_n) and (not self.cv_event.is_set()):
+                        self.cv_frame_counter = 0
+                        self.cv_event.set()
+                        self.opencv_threading(input_frame)
+
+                # Накладываем overlay (для всех режимов)
                 try:
-                    mask = self.overlay.astype(bool)
-                    input_frame[mask] = self.overlay[mask]
-                    cv2.addWeighted(self.overlay, 1, input_frame, 1, 0, input_frame)
+                    if self.overlay is not None and self.overlay.shape == input_frame.shape:
+                        mask = self.overlay.astype(bool)
+                        input_frame[mask] = self.overlay[mask]
+                        cv2.addWeighted(self.overlay, 1, input_frame, 1, 0, input_frame)
                 except Exception as e:
                     print(f"[cv_ctrl._process_frame_opencv] overlay error: {e}")
             elif self.show_info_flag:
@@ -617,9 +633,16 @@ class OpencvFuncs():
             self.video_quality = int(input_quality)
 
     def set_cv_mode(self, input_mode):
+        prev_mode = self.cv_mode
         self.cv_mode = input_mode
         if self.cv_mode == f['code']['cv_none']:
             self.set_video_record_flag = False
+
+        # Управление NPU-потоком
+        if self.cv_mode == f['code']['cv_objs']:
+            self._start_npu_worker()
+        elif prev_mode == f['code']['cv_objs']:
+            self._stop_npu_worker()
 
     def set_detection_reaction(self, input_reaction):
         self.detection_reaction_mode = input_reaction
@@ -758,16 +781,71 @@ class OpencvFuncs():
                                                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         self.overlay = overlay_buffer
 
+    def _start_npu_worker(self):
+        """Запускает асинхронный NPU-поток (YOLO11s) для cv_objs."""
+        if self.npu_thread is not None and self.npu_thread.is_alive():
+            return
+        self.npu_stop_flag = False
+        self.npu_thread = threading.Thread(target=self._npu_worker, daemon=True)
+        self.npu_thread.start()
+        print("[cv_ctrl] NPU worker started", flush=True)
+
+    def _stop_npu_worker(self):
+        """Останавливает NPU-поток."""
+        if self.npu_thread is None:
+            return
+        self.npu_stop_flag = True
+        self.npu_thread.join(timeout=2.0)
+        self.npu_thread = None
+        print("[cv_ctrl] NPU worker stopped", flush=True)
+
+    def _npu_worker(self):
+        """Бесконечный цикл: берёт последний кадр, запускает NPU, обновляет overlay."""
+        import numpy as np
+        while not self.npu_stop_flag:
+            # Проверяем, что режим всё ещё cv_objs
+            if self.cv_mode != f['code']['cv_objs']:
+                time.sleep(0.1)
+                continue
+
+            # Берём последний кадр
+            with self.npu_frame_lock:
+                frame = self.npu_latest_frame
+                self.npu_latest_frame = None  # сбрасываем, чтобы не обрабатывать дважды
+
+            if frame is None:
+                time.sleep(0.01)
+                continue
+
+            # Запускаем NPU (через сокет, без записи файла)
+            try:
+                overlay_buffer = np.zeros_like(frame)
+                cv2.putText(overlay_buffer, 'NPU YOLO11s', (50, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+                detections = self.npu_client.detect(frame)
+
+                for det in detections:
+                    x0, y0, x1, y1 = det['bbox']
+                    # Конвертируем float -> int (сервер возвращает float)
+                    x0, y0, x1, y1 = int(round(x0)), int(round(y0)), int(round(x1)), int(round(y1))
+                    label = f"{det['class']}: {det['confidence']*100:.0f}%"
+                    cv2.rectangle(overlay_buffer, (x0, y0), (x1, y1), (0, 255, 0), 2)
+                    y = y0 - 10 if y0 - 10 > 10 else y0 + 20
+                    cv2.putText(overlay_buffer, label, (x0, y),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+                self.overlay = overlay_buffer
+            except Exception as e:
+                print(f"[cv_ctrl._npu_worker] error: {e}", flush=True)
+
     def cv_detect_objects(self, img):
+        """Legacy-функция. Реально cv_objs обрабатывается в _npu_worker через сокет."""
         overlay_buffer = np.zeros_like(img)
-        cv2.putText(overlay_buffer, 'NPU YOLOv5s', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        cv2.putText(overlay_buffer, 'NPU YOLO11s', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-        # Сохраняем кадр во временный файл
-        cv2.imwrite(self.npu_temp_path, img)
-
-        # Запускаем NPU-инференс
         try:
-            detections = self.yolov5_npu.detect(self.npu_temp_path)
+            detections = self.npu_client.detect(img)
         except Exception as e:
             print(f"[cv_detect_objects] NPU error: {e}")
             self.overlay = overlay_buffer

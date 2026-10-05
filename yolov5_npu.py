@@ -67,7 +67,7 @@ def detect(image_path):
 
 if __name__ == '__main__':
     # Тест на dog.jpg
-    image = "/root/npu-files/zoo/examples/yolov5/model/dog.jpg"
+    image = "/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov5/model/dog.jpg"
     print(f"Testing on {image}...")
     detections = detect(image)
     for det in detections:

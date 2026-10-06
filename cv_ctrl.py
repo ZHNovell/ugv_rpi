@@ -820,7 +820,7 @@ class OpencvFuncs():
             # Запускаем NPU (через сокет, без записи файла)
             try:
                 overlay_buffer = np.zeros_like(frame)
-                cv2.putText(overlay_buffer, 'NPU YOLO11s', (50, 50),
+                cv2.putText(overlay_buffer, 'NPU YOLO26s', (50, 50),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
                 detections = self.npu_client.detect(frame)
@@ -842,7 +842,7 @@ class OpencvFuncs():
     def cv_detect_objects(self, img):
         """Legacy-функция. Реально cv_objs обрабатывается в _npu_worker через сокет."""
         overlay_buffer = np.zeros_like(img)
-        cv2.putText(overlay_buffer, 'NPU YOLO11s', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        cv2.putText(overlay_buffer, 'NPU YOLO26s', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
         try:
             detections = self.npu_client.detect(img)

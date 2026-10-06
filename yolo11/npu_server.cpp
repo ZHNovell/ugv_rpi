@@ -36,7 +36,7 @@ struct Object {
     int label;
     float prob;
 };
-extern int detect_yolo11_6_post(const cv::Mat& bgr, std::vector<Object>& objects, float **output);
+extern int detect_yolo26_6_post(const cv::Mat& bgr, std::vector<Object>& objects, float **output);
 
 // Класс для пересылки
 struct Detection {
@@ -221,7 +221,7 @@ int main(int argc, char** argv)
 
             // Postprocess -> detections
             vector<Object> objects;
-            detect_yolo11_6_post(frame, objects, output_data);
+            detect_yolo26_6_post(frame, objects, output_data);
 
             // Конвертим в JSON
             vector<Detection> dets;

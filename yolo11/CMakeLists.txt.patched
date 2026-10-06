@@ -100,7 +100,22 @@ foreach(src ${DIRSRCS})
         list(APPEND NPU_SERVER_SRCS ${src})
     endif()
 endforeach()
-add_executable(npu_server ${NPU_SERVER_SRCS} ${NPULIB_DIRSRCS})
+# Для npu_server собираем только YOLO26-специфичные файлы
+# Исключаем: main.cpp (свой main), yolo11_6_post.cpp/yolo11_6_pre.cpp (старые, конфликтуют с YOLO26)
+set(NPU26_SRCS "")
+foreach(src ${NPU_SERVER_SRCS})
+    if(NOT src MATCHES "yolo11_6_(post|pre)\\.cpp$")
+        if(NOT src MATCHES "yolo26_6_(post|pre)\\.cpp$")
+            list(APPEND NPU26_SRCS ${src})
+        endif()
+    endif()
+endforeach()
+# + добавляем YOLO26 файлы
+list(APPEND NPU26_SRCS
+    ${CMAKE_CURRENT_SOURCE_DIR}/yolo26_6_post.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/yolo26_6_pre.cpp
+)
+add_executable(npu_server ${NPU26_SRCS} ${NPULIB_DIRSRCS})
 target_link_libraries(npu_server
     ${OpenCV_LIBRARIES}
     ${NPU_RT_LIBS}

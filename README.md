@@ -554,15 +554,15 @@ WantedBy=multi-user.target
 
 ## «🐍 Python-обёртка для «NPU-сервер (YOLO26s + YOLO11_pose)».
 
-npu_server (YOLO26s) — сокет /tmp/npu11.sock.
+- npu_server (YOLO26s) — сокет /tmp/npu11.sock.
 
-npu_pose_server (YOLO11_pose) — сокет /tmp/npu_pose.sock.
+- npu_pose_server (YOLO11_pose) — сокет /tmp/npu_pose.sock.
 
-Python-клиенты — npu_client.py, npu_pose_client.py.
+- Python-клиенты — npu_client.py, npu_pose_client.py.
 
-Автозапуск — npu-server.service, npu-pose-server.service.
+- Автозапуск — npu-server.service, npu-pose-server.service.
 
-.nb в /dev/shm — prepare_shm.sh.
+- .nb в /dev/shm — prepare_shm.sh.
 
 ## 🔧 Адаптация кода `ugv_rpi`
 

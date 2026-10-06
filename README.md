@@ -19,7 +19,7 @@
 - **General Driver for Robots** — Waveshare, ESP32-WROOM-32UE, 2×MX1919, INA219, OLED SSD1306 (0x3C).
 - **2-Axis Pan-Tilt Camera Module** — сервоприводы ST3215, UART.
 - **Шасси WAVE ROVER** — 4 мотора, 4 энкодера, 3S Li-Ion UPS.
-- **USB-камера** — Logitech C920 HD Pro Webcam (навигационная).
+- **USB-камера** — (навигационная).
 - **CSI-камера** — (опционально, обзорная).
 
 **Архитектура управления:**

@@ -50,11 +50,17 @@ class OpencvFuncs():
         self.cv_frame_counter = 0
         self.cv_run_every_n = 3  # run NPU/CV detection once per N frames
 
-        # Async NPU worker (для cv_objs — YOLO11s без блокировки главного потока)
+        # Async NPU worker (для cv_objs — YOLO11s/YOLO26s без блокировки главного потока)
         self.npu_thread = None
         self.npu_stop_flag = False
         self.npu_latest_frame = None
         self.npu_frame_lock = threading.Lock()
+
+        # Async NPU pose worker (для mp_pose — YOLO11_pose)
+        self.npu_pose_thread = None
+        self.npu_pose_stop_flag = False
+        self.npu_pose_latest_frame = None
+        self.npu_pose_frame_lock = threading.Lock()
         self.cv_mode = f['code'][f'cv_none']
         self.detection_reaction_mode = f['code']['re_none']
         
@@ -116,6 +122,8 @@ class OpencvFuncs():
         # NPU YOLO11s (через Python-обёртку)
         from npu_client import NPUClient
         self.npu_client = NPUClient()
+        from npu_pose_client import NPUPoseClient
+        self.npu_pose_client = NPUPoseClient()
         self.npu_temp_path = "/tmp/yolo_input.jpg"
 
         # mediapipe (only if available)
@@ -281,10 +289,13 @@ class OpencvFuncs():
             # OpenCV funcs (overlay)
             if self.cv_mode != f['code']['cv_none']:
                 if self.cv_mode == f['code']['cv_objs']:
-                    # cv_objs: YOLO11s работает в асинхронном потоке.
-                    # Главный поток только отдаёт свежий кадр и накладывает overlay.
+                    # cv_objs: YOLO26s работает в асинхронном потоке.
                     with self.npu_frame_lock:
                         self.npu_latest_frame = input_frame.copy()
+                elif self.cv_mode == f['code']['mp_pose']:
+                    # mp_pose: YOLO11_pose работает в асинхронном потоке.
+                    with self.npu_pose_frame_lock:
+                        self.npu_pose_latest_frame = input_frame.copy()
                 else:
                     # Остальные CV-режимы — как раньше (в отдельном потоке)
                     self.cv_frame_counter += 1
@@ -638,11 +649,17 @@ class OpencvFuncs():
         if self.cv_mode == f['code']['cv_none']:
             self.set_video_record_flag = False
 
-        # Управление NPU-потоком
+        # Управление NPU-потоком (YOLO26s)
         if self.cv_mode == f['code']['cv_objs']:
             self._start_npu_worker()
         elif prev_mode == f['code']['cv_objs']:
             self._stop_npu_worker()
+
+        # Управление NPU pose-потоком (YOLO11_pose)
+        if self.cv_mode == f['code']['mp_pose']:
+            self._start_npu_pose_worker()
+        elif prev_mode == f['code']['mp_pose']:
+            self._stop_npu_pose_worker()
 
     def set_detection_reaction(self, input_reaction):
         self.detection_reaction_mode = input_reaction
@@ -1183,6 +1200,86 @@ class OpencvFuncs():
             for detection in results.detections:
                 self.mpDraw.draw_detection(overlay_buffer, detection)
         self.overlay = overlay_buffer
+
+    def _start_npu_pose_worker(self):
+        """Запускает асинхронный NPU-поток (YOLO11_pose)."""
+        if self.npu_pose_thread is not None and self.npu_pose_thread.is_alive():
+            return
+        self.npu_pose_stop_flag = False
+        self.npu_pose_thread = threading.Thread(target=self._npu_pose_worker, daemon=True)
+        self.npu_pose_thread.start()
+        print("[cv_ctrl] NPU pose worker started", flush=True)
+
+    def _stop_npu_pose_worker(self):
+        """Останавливает pose-поток."""
+        if self.npu_pose_thread is None:
+            return
+        self.npu_pose_stop_flag = True
+        self.npu_pose_thread.join(timeout=2.0)
+        self.npu_pose_thread = None
+        print("[cv_ctrl] NPU pose worker stopped", flush=True)
+
+    def _npu_pose_worker(self):
+        """Бесконечный цикл: берёт последний кадр, запускает pose-инференс, рисует скелет."""
+        import numpy as np
+        # COCO keypoint skeleton connections (17 points)
+        skeleton = [
+            (0, 1), (0, 2), (1, 3), (2, 4),          # head
+            (5, 6), (5, 7), (7, 9), (6, 8), (8, 10), # arms
+            (5, 11), (6, 12), (11, 12),               # torso
+            (11, 13), (13, 15), (12, 14), (14, 16),   # legs
+        ]
+
+        while not self.npu_pose_stop_flag:
+            if self.cv_mode != f['code']['mp_pose']:
+                time.sleep(0.1)
+                continue
+
+            with self.npu_pose_frame_lock:
+                frame = self.npu_pose_latest_frame
+                self.npu_pose_latest_frame = None
+
+            if frame is None:
+                time.sleep(0.01)
+                continue
+
+            try:
+                overlay_buffer = np.zeros_like(frame)
+                cv2.putText(overlay_buffer, 'NPU YOLO11_pose', (50, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+                detections = self.npu_pose_client.detect(frame)
+
+                for det in detections:
+                    x0, y0, x1, y1 = det['bbox']
+                    x0, y0, x1, y1 = int(round(x0)), int(round(y0)), int(round(x1)), int(round(y1))
+                    label = f"{det['class']}: {det['confidence']*100:.0f}%"
+                    cv2.rectangle(overlay_buffer, (x0, y0), (x1, y1), (0, 255, 0), 2)
+                    y = y0 - 10 if y0 - 10 > 10 else y0 + 20
+                    cv2.putText(overlay_buffer, label, (x0, y),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+                    # Рисуем keypoints и скелет
+                    kps = det.get('keypoints', [])
+                    if len(kps) >= 17:
+                        # Точки
+                        for kp in kps:
+                            kx, ky, kprob = kp
+                            if kprob > 0.3:
+                                cv2.circle(overlay_buffer, (int(kx), int(ky)), 4, (0, 0, 255), -1)
+                        # Соединения
+                        for (a, b) in skeleton:
+                            kpa = kps[a]
+                            kpb = kps[b]
+                            if kpa[2] > 0.3 and kpb[2] > 0.3:
+                                cv2.line(overlay_buffer,
+                                         (int(kpa[0]), int(kpa[1])),
+                                         (int(kpb[0]), int(kpb[1])),
+                                         (0, 255, 255), 2)
+
+                self.overlay = overlay_buffer
+            except Exception as e:
+                print(f"[cv_ctrl._npu_pose_worker] error: {e}", flush=True)
 
     def mediaPipe_pose(self, img):
         if not MEDIAPIPE_AVAILABLE:

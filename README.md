@@ -387,17 +387,17 @@ JSON: [{"class_id": 16, "class": "dog", "confidence": 0.92, "bbox": [x0,y0,x1,y1
 **`/etc/systemd/system/npu-server.service`:**
 ```ini
 [Unit]
-Description=NPU Server for YOLO11s (A733)
+Description=NPU Server for YOLO26s (A733)
 After=network.target
 Before=ugv.service
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/ugv_rpi/yolo11
+WorkingDirectory=/root/ugv_rpi/yolo26
 Environment=LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733
 ExecStartPre=/root/ugv_rpi/prepare_shm.sh
-ExecStart=/root/ugv_rpi/yolo11/npu_server /dev/shm/yolo26s_6_pcq_a733.nb
+ExecStart=/root/ugv_rpi/yolo26/npu_server /dev/shm/yolo26s_6_pcq_a733.nb
 Restart=always
 RestartSec=3
 
@@ -552,7 +552,7 @@ WantedBy=multi-user.target
 - `npu_pose_client.py` — Python-клиент (в корне репозитория).
 - `/etc/systemd/system/npu-pose-server.service` — автозапуск.
 
-## «🐍 Python-обёртка для «NPU-сервер (YOLO26s + YOLO11_pose)».
+## 🐍 NPU-сервер (YOLO26s + YOLO11_pose)
 
 - npu_server (YOLO26s) — сокет /tmp/npu11.sock.
 
@@ -688,22 +688,26 @@ self.net = cv2.dnn.readNetFromCaffe(thisPath + '/models/deploy.prototxt', ...)
 self.class_names = [...]
 
 # Стало:
-import yolov5_npu
-self.yolov5_npu = yolov5_npu
-self.npu_temp_path = "/tmp/yolo_input.jpg"
+from npu_client import NPUClient
+self.npu_client = NPUClient()
+from npu_pose_client import NPUPoseClient
+self.npu_pose_client = NPUPoseClient()
 ```
 
 **Изменение 5:** Функция `cv_detect_objects` — использует NPU.
 
 ```python
 def cv_detect_objects(self, img):
+    """
+    Legacy-функция. Реально cv_objs обрабатывается в _npu_worker через сокет.
+    Эта функция вызывается только если что-то сломалось в воркере.
+    """
     overlay_buffer = np.zeros_like(img)
-    cv2.putText(overlay_buffer, 'NPU YOLOv5s', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-
-    cv2.imwrite(self.npu_temp_path, img)
+    cv2.putText(overlay_buffer, 'NPU YOLO26s', (50, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
     try:
-        detections = self.yolov5_npu.detect(self.npu_temp_path)
+        detections = self.npu_client.detect(img)   # ← сокет, не subprocess
     except Exception as e:
         print(f"[cv_detect_objects] NPU error: {e}")
         self.overlay = overlay_buffer
@@ -711,10 +715,12 @@ def cv_detect_objects(self, img):
 
     for det in detections:
         x0, y0, x1, y1 = det['bbox']
+        x0, y0, x1, y1 = int(round(x0)), int(round(y0)), int(round(x1)), int(round(y1))
         label = f"{det['class']}: {det['confidence']*100:.0f}%"
         cv2.rectangle(overlay_buffer, (x0, y0), (x1, y1), (0, 255, 0), 2)
         y = y0 - 10 if y0 - 10 > 10 else y0 + 20
-        cv2.putText(overlay_buffer, label, (x0, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        cv2.putText(overlay_buffer, label, (x0, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
     self.overlay = overlay_buffer
 ```
@@ -833,11 +839,28 @@ function speedCtrl(inputSpd){
 ### `templates/style.css`
 
 ```css
-.video img{
+.video{
     width: 960px;
     height: 540px;
+    overflow: hidden;
+}
+.video img{
+    width: 100%;
+    height: 100%;
     border-radius: 4px;
     object-fit: contain;
+}
+
+/* Родительский контейнер страницы */
+main {
+    width: 1600px;
+    margin: auto;
+}
+
+/* Секция с видео */
+.box1 .section_video{
+    width: 1000px;
+    margin-right: 10px;
 }
 ```
 
@@ -914,12 +937,12 @@ journalctl -u ugv.service -f
 | None | 10301 | Отключить детекцию |
 | Motion | 10302 | Детекция движения |
 | Faces | 10303 | Детекция лиц |
-| Objects | 10304 | Детекция объектов (NPU YOLOv5s) |
+| Objects | 10304 | Детекция объектов (NPU YOLO26s) |
 | Color | 10305 | Детекция цвета |
 | Hand GS | 10306 | Жесты рук |
 | Auto | 10307 | Авто-режим |
 | MP Face | 10308 | MediaPipe Face |
-| MP Pose | 10309 | MediaPipe Pose |
+| MP Pose | 10309 | NPU YOLO11_pose (17 keypoints) |
 
 ### Формат отправки (через `base_ctrl.py`)
 
@@ -932,8 +955,6 @@ cmdline_ctrl('base -c {"T":10304}')
 # base.base_json_ctrl(json.loads(args[2]))
 # → UART7: {"T":10304}\n
 ```
-
-## 🆕 Обновления (2026-09-29)
 
 ### 📷 USB-камера (Logitech C920 HD Pro)
 
@@ -1408,7 +1429,7 @@ detection num: 3
 - [x] **Обработчик `SIGTERM`** в `app.py`.
 - [x] **Запись видео с параллельным потоком** — GStreamer `tee` + `avenc_mjpeg` + `.mkv`.
 - [x] **YOLOv26** — более точная модель - выполнено досрочно.
-- [x] **YOLOv26** — более точная модель - выполнено досрочно.
+- [x] **YOLO11_pose** — 17 keypoints, скелет — выполнено досрочно.
 - [ ] **YOLO26_depth** — карта глубины (из Model Zoo v1.1.0).
 - [ ] **YOLO11_seg** — сегментация.
 - [ ] **eMMC 200 МГц** — вернуть скорость (с бэкапом).
@@ -1422,7 +1443,8 @@ detection num: 3
 
 ### Долгосрочное
 
-- [ ] **MediaPipe на NPU** — если получится портировать.
+- [x] **MediaPipe Pose → YOLO11_pose (NPU)** — выполнено.
+- [ ] **MediaPipe Face** — заменить на NPU (по аналогии с pose).
 - [ ] **Автопилот** — SLAM или визуальная одометрия.
 - [ ] **Голосовое управление** — через `pyttsx3` + распознавание.
 

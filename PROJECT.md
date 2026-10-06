@@ -1407,9 +1407,108 @@ cd /root/ugv_rpi/yolo26/
 - `prepare_shm.sh` — копирование `.nb` в RAM.
 - `/etc/systemd/system/npu-server.service` — автозапуск.
 
+## 🆕 Обновления (2026-10-06): YOLO11_pose на NPU — скелет в реальном времени
 
+**Итог:** YOLO11_pose работает на NPU A733 через **второй NPU-сервер** (`npu_pose_server`, сокет `/tmp/npu_pose.sock`). **Заменяет MediaPipe Pose** (который не работает на A733). Кнопка **MP POSE** в веб-интерфейсе теперь использует **NPU-инференс**.
 
+### Что нового
 
+1. **YOLO11_pose INT8 (uint8)** сконвертирована в `.nb` (7 МБ).
+2. **Второй NPU-сервер** — `npu_pose_server` (по аналогии с YOLO26).
+3. **Python-клиент** — `npu_pose_client.py` (подключается к `/tmp/npu_pose.sock`).
+4. **Асинхронный pose-воркер** в `cv_ctrl.py` — `_npu_pose_worker`.
+5. **Отрисовка скелета** — 17 keypoints + 19 соединений (COCO skeleton).
+6. **Автозапуск** — `npu-pose-server.service`.
+
+### Архитектура
+
+```
+Клиент (cv_ctrl.py)          Сервер (npu_pose_server)
+        |                              |
+        |--- JPEG (4 байта + данные) ->|
+        |                              | decode + letterbox 640×640
+        |                              | NPU inference (YOLO11_pose)
+        |                              | detect_yolo11_pose_9_post
+        |<- JSON (4 байта + данные) ---|
+        |                              |
+   рисуем bbox + скелет                |
+```
+
+**Сокеты:**
+- `/tmp/npu11.sock` — YOLO26s (детекция объектов).
+- `/tmp/npu_pose.sock` — YOLO11_pose (17 keypoints).
+
+**Оба сервера работают параллельно**, переключение — **мгновенное** (без subprocess).
+
+### Модель
+
+- **9 выходов**: bbox (cv2) + class (cv3) + keypoints (cv4) × 3 уровня (80×80, 40×40, 20×20).
+- **1 класс** — person.
+- **17 keypoints** COCO: нос, глаза, уши, плечи, локти, запястья, бёдра, колени, лодыжки.
+- **Detection time**: ~62 мс.
+- **FPS**: ~28 (с отрисовкой скелета).
+- **CPU**: минимальная нагрузка.
+
+### Пайплайн конвертации
+
+1. **`yolo11s-pose.pt`** (Ultralytics) → ONNX (opset 15).
+2. **`onnx_extract.py`** — вырезать 9 выходов (cv2/cv3/cv4 × 3 уровня).
+3. **Docker ACUITY** (`ubuntu-npu:v2.0.10.2`):
+   - `./pegasus_import.sh yolo11s-pose_9`
+   - `./pegasus_quantize.sh yolo11s-pose_9 uint8 12`
+   - `./pegasus_export_ovx_nbg.sh yolo11s-pose_9 uint8 a733`
+4. **Результат:** `yolo11s-pose_9_uint8_a733.nb` (7 МБ).
+
+### Нативная сборка
+
+```bash
+cd /root/ugv_rpi/yolo11_pose/
+./build_native.sh
+```
+
+**Ключевые фиксы** (аналогично YOLO26):
+1. `SYS_ARCH=linux_aarch64`.
+2. OpenCV через `pkg-config`.
+3. Убрать `_GLIBCXX_USE_CXX11_ABI=0`.
+4. `MODEL_ZOO_HOME_DIR` — абсолютный путь.
+5. Исключить `main.cpp`, `npu_server.cpp`, `npu_pose_server.cpp`, `yolo11_6_*.cpp` из сборки.
+6. Собирать только `npu_pose_server`.
+
+### Автозапуск
+
+**`/etc/systemd/system/npu-pose-server.service`:**
+```ini
+[Unit]
+Description=NPU Pose Server for YOLO11_pose (A733)
+After=network.target
+Before=ugv.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/ugv_rpi/yolo11_pose
+Environment=LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733
+ExecStartPre=/bin/sh -c 'cp /root/ugv_rpi/yolo11_pose/yolo11s-pose_9_uint8_a733.nb /dev/shm/ 2>/dev/null || true'
+ExecStart=/root/ugv_rpi/yolo11_pose/npu_pose_server /dev/shm/yolo11s-pose_9_uint8_a733.nb
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Интеграция с роботом
+
+- **Кнопка MP POSE** (T=10309) → `set_cv_mode(mp_pose)` → **запуск pose-воркера**.
+- **Переключение OBJECTS ↔ MP POSE** — **мгновенное**.
+- **Отрисовка:** bbox + label + 17 keypoints (красные кружки) + 19 соединений (жёлтые линии).
+- **Фильтр по confidence** — keypoints с `prob > 0.3`.
+
+### Файлы в репозитории
+
+- `yolo11_pose/` — папка YOLO11_pose (модель, сервер, скрипты, README).
+- `npu_pose_client.py` — Python-клиент (в корне репозитория).
+- `/etc/systemd/system/npu-pose-server.service` — автозапуск.
 
 
 
@@ -1475,6 +1574,7 @@ cd /root/ugv_rpi/yolo26/
 - **2026-10-03:** Переключение режима камеры (1080p30 ↔ 720p60) по кнопке WebRTC. RES-индикатор в OSD. Динамический FPS-лимит в `generate_frames`. Проверено с NPU и записью.
 - **2026-10-05:** YOLO11s сконвертирована в INT8 (`.nb` 6.6 МБ), C++ демо собрано нативно на Orange Pi, тест пройден (27 FPS, `dog: 92%`). Пайплайн: Allwinner Model Zoo v1.1.0 + ACUITY Toolkit 6.30.22 + Docker `ubuntu-npu:v2.0.10.2`. Папка `yolo11/` добавлена в репозиторий.
 - **2026-10-06:** YOLO26s INT8 (PCQ) сконвертирована, `npu_server` пересобран под YOLO26. FPS 29 (1080p30) / 60 (720p60). CPU ~36-38%. Удалённые объекты — лучше. Папка `yolo26/` в репозитории. Commit `b83d513`.
+- **2026-10-06:** YOLO11_pose INT8 сконвертирована. Второй NPU-сервер (`npu_pose_server`). Python-клиент. Асинхронный pose-воркер. Отрисовка скелета (17 keypoints). FPS ~28. Переключение OBJECTS ↔ MP POSE мгновенное. Commit `f8d8da8`.
 
 ---
 

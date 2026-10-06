@@ -10,6 +10,24 @@
 
 # Orange Pi 4 Pro UGV Robot
 
+## 📖 О проекте
+
+**UGV-робот** на **Orange Pi 4 Pro** (Allwinner A733, NPU 3 TOPS) с **двумя NPU-серверами**:
+- **YOLO26s** — детекция объектов (29 FPS).
+- **YOLO11_pose** — позы людей (17 keypoints, 28 FPS).
+
+**Возможности:**
+- **Живой MJPEG-поток** с камеры (1080p30 / 720p60).
+- **Запись видео** (`.mkv`, без прерывания потока).
+- **NPU-инференс** через **UNIX-сокет** (отставание <0.3 сек).
+- **Веб-интерфейс** (Flask + Socket.IO).
+- **Управление** через **ESP32** (UART7).
+
+**Ключевые особенности:**
+- **Отставание рамок** — **<0.3 сек** (в 3 раза **быстрее** YOLO11s через subprocess).
+- **CPU** — **36-38%** (вместо 55%).
+- **Автозапуск** — `npu-server.service`, `npu-pose-server.service`, `ugv.service`.
+
 ## 📋 Общая архитектура
 
 **Проект:** Робот на базе Waveshare UGV (WAVE ROVER / General Driver for Robots) с заменой Raspberry Pi на Orange Pi 4 Pro.

@@ -6,6 +6,7 @@
 ![GitHub repo size](https://img.shields.io/github/repo-size/ZHNovell/ugv_rpi)
 ![GitHub](https://img.shields.io/github/license/ZHNovell/ugv_rpi)
 ![GitHub last commit](https://img.shields.io/github/last-commit/ZHNovell/ugv_rpi)
+<img width="1088" height="721" alt="261006200253" src="https://github.com/user-attachments/assets/efb88a67-23bf-4e98-9f76-48bdf8eb0775" />
 
 
 ## 📋 Общая архитектура

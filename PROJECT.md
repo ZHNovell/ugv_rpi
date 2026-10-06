@@ -1282,6 +1282,137 @@ detection num: 3
 - **Готовый пайплайн** — можно пересобрать модель под **другие задачи** (pose, seg, depth — есть в `examples/yolo11_pose/`, `yolo11_seg/`, `yolo26_depth/`).
 - **Официальная поддержка** Allwinner — не самодельная конвертация.
 
+## 🆕 Обновления (2026-10-06): YOLO26s + устранение отставания через NPU-сервер
+
+**Итог:** YOLO26s INT8 (PCQ) работает на NPU A733. **Отставание рамок < 0.3 сек** (было ~1 сек). Архитектура — **постоянный C++ NPU-сервер через UNIX-сокет** (вместо `subprocess.run` на каждый кадр).
+
+### Почему YOLO26s лучше YOLO11s
+
+Три ключевых улучшения:
+1. **DFL-free** (убран Distribution Focal Loss) — голова проще, лучше квантизуется.
+2. **NMS-free** — постобработка ~6 мс вместо ~11 мс.
+3. **ProgLoss + STAL** — лучше детектит мелкие и удалённые объекты.
+
+### Проблема с `subprocess` (решение от 2026-10-05)
+
+Первая версия (YOLO11s) вызывала демо через `subprocess.run()` на каждый кадр:
+- **fork + exec** — ~20-50 мс.
+- **Загрузка `.nb` (6.6 МБ)** с eMMC 52 МГц — ~100-130 мс.
+- **`cv2.imwrite` + `cv2.imread`** — ~20-30 мс.
+- **Итого ~200-300 мс** на цикл → **отставание ~0.7-1 сек**.
+
+### Решение: NPU-сервер через UNIX-сокет
+
+**C++ сервер `npu_server`** (`yolo26/npu_server.cpp`):
+- Загружает модель **ОДИН РАЗ** при старте.
+- Слушает UNIX-сокет `/tmp/npu11.sock`.
+- Принимает JPEG-кадры от Python (4 байта длины BE + JPEG).
+- Декодирует, letterbox 640×640, запускает NPU.
+- Постобработка (`detect_yolo26_6_post`).
+- Возвращает JSON (4 байта длины BE + JSON).
+
+**Python-клиент `npu_client.py`:**
+- Подключается к сокету (с автопереподключением).
+- `detect(frame)` — отправляет JPEG, получает список детекций.
+- Асинхронный воркер `_npu_worker` в `cv_ctrl.py` — крутится в отдельном потоке, обновляет `self.overlay`.
+
+### Результаты YOLO26s vs YOLO11s
+
+| Метрика | YOLO11s | YOLO26s |
+|---|---|---|
+| FPS 1080p30 | 26 | **29** |
+| FPS 720p60 | 57 | **60** |
+| CPU 1080p30 | 39% | **36-38%** |
+| CPU 720p60 | 35% | **36%** |
+| Удалённые объекты | часто терялись | **лучше** |
+| Мигание (статика) | иногда | **нет** |
+| Отставание | <0.3 сек | **<0.3 сек** |
+
+**Температура** — ниже (меньше CPU → меньше тепла).
+
+### Протокол
+
+```
+Клиент -> Сервер: [4 байта BE: длина JPEG] [JPEG bytes]
+Сервер -> Клиент: [4 байта BE: длина JSON] [JSON bytes]
+
+JSON: [{"class_id": 16, "class": "dog", "confidence": 0.92, "bbox": [x0,y0,x1,y1]}, ...]
+```
+
+### Автозапуск
+
+**`/etc/systemd/system/npu-server.service`:**
+```ini
+[Unit]
+Description=NPU Server for YOLO11s (A733)
+After=network.target
+Before=ugv.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/ugv_rpi/yolo11
+Environment=LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733
+ExecStartPre=/root/ugv_rpi/prepare_shm.sh
+ExecStart=/root/ugv_rpi/yolo11/npu_server /dev/shm/yolo26s_6_pcq_a733.nb
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**`ugv.service`** — `After=network.target npu-server.service` + `Requires=npu-server.service`.
+
+**`prepare_shm.sh`** — копирует YOLO26 модель в `/dev/shm/` (RAM-диск) при старте.
+
+### Пайплайн конвертации YOLO26s (PCQ)
+
+1. **Скачать** `yolo26s.pt` (Ultralytics).
+2. **Экспорт ONNX** (opset 16): `yolo export model=yolo26s.pt format=onnx simplify=True dynamic=False opset=16`.
+3. **Вырезать 6 выходов** через `onnx_extract.py`:
+   - `/model.23/Reshape_output_0` (`[1, 4, 6400]` — bbox, stride 8)
+   - `/model.23/Reshape_1_output_0` (`[1, 4, 1600]`)
+   - `/model.23/Reshape_2_output_0` (`[1, 4, 400]`)
+   - `/model.23/Reshape_3_output_0` (`[1, 80, 6400]` — classes)
+   - `/model.23/Reshape_4_output_0` (`[1, 80, 1600]`)
+   - `/model.23/Reshape_5_output_0` (`[1, 80, 400]`)
+4. **Docker ACUITY** (`ubuntu-npu:v2.0.10.2`):
+   - `./pegasus_import.sh yolo26s_6`
+   - `./pegasus_quantize.sh yolo26s_6 pcq 12` ← **PCQ**, не uint8.
+   - `./pegasus_export_ovx_nbg.sh yolo26s_6 pcq a733`
+5. **Результат:** `yolo26s_6_pcq_a733.nb` (9 МБ).
+
+### Нативная сборка NPU-сервера на Orange Pi
+
+```bash
+cd /root/ugv_rpi/yolo26/
+./build_native.sh
+```
+
+**Ключевые фиксы `CMakeLists.txt.patched`:**
+1. `SYS_ARCH=linux_aarch64` — принудительно.
+2. OpenCV через `pkg-config` — не `find_package`.
+3. Убрать `_GLIBCXX_USE_CXX11_ABI=0` — иначе конфликт с системным OpenCV 4.10.
+4. `MODEL_ZOO_HOME_DIR` — абсолютный путь.
+5. `static` у `detect_yolo26_6_post` — убран (для экспорта).
+6. Исключить `yolo11_6_*.cpp` из сборки (конфликтуют с YOLO26).
+7. `main.cpp` — исключён из `npu_server` (у него свой `main`).
+
+### Файлы в репозитории
+
+- `yolo26/` — папка YOLO26s (модель, сервер, скрипты, README).
+- `yolo11/` — папка YOLO11s (остаётся как история).
+- `npu_client.py` — Python-клиент (общий для YOLO11/YOLO26).
+- `prepare_shm.sh` — копирование `.nb` в RAM.
+- `/etc/systemd/system/npu-server.service` — автозапуск.
+
+
+
+
+
+
+
 ## 🚧 Что осталось
 
 ### Ближайшее
@@ -1343,6 +1474,8 @@ detection num: 3
 - **2026-10-02:** GStreamer `tee` — запись без прерывания живого потока. Контейнер `.mkv` (matroskamux) — VFR сохранён.
 - **2026-10-03:** Переключение режима камеры (1080p30 ↔ 720p60) по кнопке WebRTC. RES-индикатор в OSD. Динамический FPS-лимит в `generate_frames`. Проверено с NPU и записью.
 - **2026-10-05:** YOLO11s сконвертирована в INT8 (`.nb` 6.6 МБ), C++ демо собрано нативно на Orange Pi, тест пройден (27 FPS, `dog: 92%`). Пайплайн: Allwinner Model Zoo v1.1.0 + ACUITY Toolkit 6.30.22 + Docker `ubuntu-npu:v2.0.10.2`. Папка `yolo11/` добавлена в репозиторий.
+- **2026-10-06:** YOLO26s INT8 (PCQ) сконвертирована, `npu_server` пересобран под YOLO26. FPS 29 (1080p30) / 60 (720p60). CPU ~36-38%. Удалённые объекты — лучше. Папка `yolo26/` в репозитории. Commit `b83d513`.
+
 ---
 
 **Последнее обновление:** 2026-10-03

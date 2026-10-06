@@ -1178,125 +1178,110 @@ ffprobe -v error -show_format /tmp/test.mp4
 - ✅ **Запись видео** работает в обоих режимах (файл .mkv, 720p, 60 fps реальных).
 - ✅ **FPS в OSD** меняется (30 ↔ 57-60).
 
-## 🆕 Обновления (2026-10-0): Конвертация моделей YOLOv9 для NPU Allwinner A733 (FP16)
+## 🆕 Обновления (2026-10-05): YOLO11s на NPU Allwinner A733 (INT8, 27 FPS)
 
-**Проблема:** При стандартной INT8-квантовании через Acuity Toolkit модель выдавала некорректные результаты (68+ детекций с вероятностью ~50% для всего подряд). 
-**Диагностика:** Анализ гистограммы выходных данных показал, что 82% значений застряли в диапазоне `[0..15]` (INT8). Это произошло из-за того, что конвертер автоматически склеивал два выхода ONNX (`bbox` и `scores`) в один тензор и применял к ним общую, некорректную математику масштабирования (scale/zero_point) без калибровочного датасета.
-**Решение:** Переход на формат **FP16** (полуточность). Это полностью исключает искажения INT8-квантования, сохраняя исходную точность ONNX-модели. Размер модели увеличивается незначительно (до ~15-25 МБ), а скорость на NPU A733 остается высокой.
+**Итог:** YOLO11s успешно сконвертирована в INT8, собирается и работает на NPU A733 (Orange Pi 4 Pro).
+**Скорость:** ~37 мс на инференс (~27 FPS) + ~5 мс постобработка на CPU.
+**Точность:** правильная детекция (`dog: 92%`, `bicycle: 94%`, `truck: 50%` на тестовом `dog.jpg`).
 
-#### 🛠 Алгоритм конвертации (отлаженный пайплайн)
+### Почему YOLO11s, а не YOLOv9
 
-**1. Подготовка ONNX (Гостевая ОС Ubuntu VirtualBox):**
-Скачиваем официальные репараметризованные веса и экспортируем в ONNX с упрощением графа:
-```bash
-cd /home/user/yolov9
-source yolovenv/bin/activate
+YOLOv9 **не поддерживается** официально Allwinner для A733 (нет в Model Zoo v0.9.0 / v1.1.0).
+YOLO11s **официально поддержан** — есть `examples/yolo11/` с **готовыми скриптами конвертации**, **C++ постобработкой**, **датасетом** для калибровки.
+YOLO11s — **новее, легче, точнее** YOLOv9 при том же размере.
 
-# Для YOLOv9-tiny (320x320 или 640x640)
-wget -O yolov9-t-converted.pt https://github.com/WongKinYiu/yolov9/releases/download/v0.1/yolov9-t-converted.pt
-python3 export.py --weights ./yolov9-t-converted.pt --img-size 640 640 --batch-size 1 --include onnx --simplify
+### Пайплайн конвертации
 
-# Для YOLOv9-small (640x640)
-wget -O yolov9-s-converted.pt https://github.com/WongKinYiu/yolov9/releases/download/v0.1/yolov9-s-converted.pt
-python3 export.py --weights ./yolov9-s-converted.pt --img-size 640 640 --batch-size 1 --include onnx --simplify
-```
-**2. Конвертация в Docker (Образ ubuntu-npu:v2.0.10.2):**
-Важно: Образ содержит баг в путях к библиотекам для финальной компиляции C-кода. Перед запуском pegasus.py необходимо создать символические ссылки (workaround):
-```bash
-# Внутри контейнера Docker:
-# 1. Ссылка на папку с .so библиотеками
-ln -s /root/Vivante_IDE/VivanteIDE5.11.0/cmdtools/vsimulator/lib /root/Vivante_IDE/VivanteIDE5.11.0/prebuilt-sdk/x86_64_linux/lib
+**Источник ONNX:** `https://netstorage.allwinnertech.com:5001/sharing/SwiiD4rGh` — готовый `yolo11s_6.onnx` от Allwinner (37 МБ, **уже обрезан через `onnx_extract.py`**: постобработка вынесена на CPU).
 
-# 2. Ссылки на отсутствующие библиотеки линковщика
-mkdir -p /root/Vivante_IDE/VivanteIDE5.11.0/prebuilt-sdk/common/lib
-ln -s /root/Vivante_IDE/VivanteIDE5.11.0/cmdtools/common/lib/libjpeg.a /root/Vivante_IDE/VivanteIDE5.11.0/prebuilt-sdk/common/lib/libjpeg.a
-ln -s /root/Vivante_IDE/VivanteIDE5.11.0/cmdtools/common/lib/libvdtproxy.so /root/Vivante_IDE/VivanteIDE5.11.0/cmdtools/vsimulator/lib/libvdtproxy.so
-```
-**3. Импорт и Экспорт (внутри Docker):**
-Создаем файл метаданных входа (input_meta_640.yaml для 640x640 или input_meta_320.yaml для 320x320):
-```yaml
-images:
-  shape: [1, 3, 640, 640] # или [1, 3, 320, 320]
-  format: "rgb"
-  mean_value: [0, 0, 0]
-  std_value: [1.0, 1.0, 1.0]
-```
-Запускаем конвертацию (пример для YOLOv9-s):
-```bash
-# Импорт
-python3 /root/acuity-toolkit-whl-6.30.22/bin/pegasus.py import onnx \
-    --model yolov9-s-converted.onnx \
-    --output-model yolov9s_acuity.json \
-    --output-data yolov9s_acuity.data
+**Model Zoo v1.1.0:** скачивается с [Allwinner Customer Service Platform](https://www.aw-ol.com/) — регистрация → **Resource Download** → **AI Development SDK** → **AWNPU_ModelZoo v1.1.0** (303 МБ).
 
-# Экспорт в NBG (FP16) для чипа A733 (VIP9000NANODI_PLUS)
-python3 /root/acuity-toolkit-whl-6.30.22/bin/pegasus.py export ovxlib \
-    --model yolov9s_acuity.json \
-    --model-data yolov9s_acuity.data \
-    --output-path yolov9s_fp16.nb \
-    --dtype float16 \
-    --optimize VIP9000NANODI_PLUS_PID0X1000003B \
-    --pack-nbg-unify \
-    --viv-sdk /root/Vivante_IDE/VivanteIDE5.11.0 \
-    --with-input-meta input_meta_640.yaml
-```
-**4. Извлечение результата:**
-Готовый файл network_binary.nb появляется в папке /workspace/yolov9_nbg_unify/. Копируем его в примонтированную папку для передачи на хост-машину:
-```bash
-cp /workspace/yolov9_nbg_unify/network_binary.nb /workspace/yolov9/yolov9s_fp16.nb
-# Затем в гостевой Ubuntu: cp /home/user/yolov9/yolov9s_fp16.nb /media/sf_orangepi-build/
-```
-**4. Запускаем диагностику для самой быстрой модели (Tiny 320x320):**
+**Docker-образ:** `ubuntu-npu:v2.0.10.2` (ACUITY Toolkit 6.30.22, IDE 5.11.0).
+
+**Скрипты конвертации** (в `examples/yolo11/convert_model/`):
 
 ```bash
-cd /root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov8/build
+# 1. Симлинки на общие скрипты
+./convert_model_env.sh
 
+# 2. Импорт ONNX → ACUITY JSON+DATA
+./pegasus_import.sh yolo11s_6
+
+# 3. Квантизация (uint8, 12 калибровочных изображений из coco_12)
+./pegasus_quantize.sh yolo11s_6 uint8 12
+
+# 4. Экспорт в .nb для A733
+./pegasus_export_ovx_nbg.sh yolo11s_6 uint8 a733
+```
+
+**Результат:** `yolo11s_6_uint8_a733.nb` — **6.6 МБ** (INT8, в 5.5 раз меньше FP32 ONNX).
+**Копируется** в `examples/yolo11/model/`.
+
+### Нативная сборка C++ демо на Orange Pi
+
+**Проблема:** стандартный `build_linux.sh` рассчитан на **кросс-компиляцию** (x86_64 → aarch64) с **toolchain 10.3** и **bundled OpenCV**. На Orange Pi это **не работает** — нужен **нативный gcc** и **системный OpenCV**.
+
+**Решение — патч `CMakeLists.txt`:**
+
+1. **`SYS_ARCH`** — принудительно `linux_aarch64` (gcc не содержит `aarch64` в имени, CMake не угадает).
+2. **OpenCV** — через **`pkg-config opencv4`** (не `find_package`, которое на Ubuntu 24.04 / OpenCV 4.10 не заполняет `OpenCV_LIBS`).
+3. **`_GLIBCXX_USE_CXX11_ABI`** — **убрать `=0`** (новый ABI обязателен для совместимости с системным OpenCV 4.10; старый ABI даёт `undefined reference to cv::imread`).
+
+**Сборка:**
+
+```bash
+cd /root/ugv_rpi/yolo11/
+./build_native.sh
+```
+
+**Готовый бинарник:** `yolo11_demo_a733` (145 КБ).
+
+### Тест
+
+```bash
+cd /root/ugv_rpi/yolo11/
 LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733 \
-./yolov8_demo_a733 -nb /root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov5/model/yolov9t_320_fp16.nb \
--i /root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov8/model/dog.jpg \
--l 1 -m 10
+./yolo11_demo_a733 -nb yolo11s_6_uint8_a733.nb \
+   -i /root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolo11/model/dog.jpg \
+   -l 1 -m 10
 ```
-**Результат:**
-```text
-=== FP16 МОДЕЛЬ ДИАГНОСТИКА (YOLOv9-tiny 320x320) ===
-Total elements: 176400
-Min: -48, Max: 372, Mean: 4.70434
-Гистограмма распределения значений:
-  [-10.0 .. -5.0): 0
-  [ -5.0 .. -1.0): 3  <-- Logits (отрицательные)
-  [ -1.0 ..  0.0): 1
-  [  0.0 ..  0.5): 166942  <-- Вероятности (низкие)
-  [  0.5 ..  1.0): 37  <-- Вероятности (высокие)
-  [  1.0 ..  5.0): 1128  <-- Координаты (малые)
-  [  5.0 .. 50.0): 3806  <-- Координаты (средние)
-  [ 50.0 .. +inf): 4480  <-- Координаты (большие)
 
-=== ПЕРВЫЕ 10 БОКСОВ (cx, cy, w, h) ===
-Box 0: cx=8, cy=11.5781, w=24, h=28.2344
-Box 1: cx=40, cy=40, w=60, h=60
-Box 2: cx=72, cy=104, w=88, h=92
-Box 3: cx=128, cy=108, w=112, h=124
-Box 4: cx=164, cy=144, w=148, h=156
-Box 5: cx=164, cy=168, w=184, h=188
-Box 6: cx=192, cy=236, w=220, h=220
-Box 7: cx=228, cy=236, w=244, h=248
-Box 8: cx=256, cy=268, w=272, h=284
-Box 9: cx=288.5, cy=352, w=340, h=312
+**Вывод:**
 
-=== ПЕРВЫЕ 10 ВЕРОЯТНОСТЕЙ (первые 3 класса) ===
-Box 0: cls0=24, cls1=44, cls2=60
-Box 1: cls0=72, cls1=80, cls2=116
-Box 2: cls0=100, cls1=104, cls2=112
-Box 3: cls0=128, cls1=140, cls2=148
-Box 4: cls0=168, cls1=172, cls2=176
-Box 5: cls0=230.75, cls1=232, cls2=212
-Box 6: cls0=228, cls1=236, cls2=272
-Box 7: cls0=256, cls1=279.25, cls2=272
-Box 8: cls0=288, cls1=336, cls2=312
-Box 9: cls0=8, cls1=-4, cls2=20
-destory npu finished.
-~NpuUint.
 ```
+input  0 dim 3 640 640 1, ... none-quant
+output 0 dim 80 80 64 1, ... none-quant
+output 1 dim 80 80 80 1, ... none-quant
+output 2 dim 40 40 64 1, ...
+output 3 dim 40 40 80 1, ...
+output 4 dim 20 20 64 1, ...
+output 5 dim 20 20 80 1, ...
+run time for this network 0: 36783 us.
+post process time : 5 ms
+detection num: 3
+ 1:  94%, [ 126,  129,  568,  419], bicycle
+16:  92%, [ 132,  220,  311,  541], dog
+ 7:  50%, [ 465,   74,  692,  170], truck
+```
+
+### Файлы в репозитории
+
+Папка **`yolo11/`**:
+- `yolo11s_6_uint8_a733.nb` — модель (INT8, 6.6 МБ).
+- `yolo11_demo_a733` — бинарник.
+- `main.cpp`, `yolo11_6_post.cpp`, `yolo11_6_pre.cpp` — исходники.
+- `model_config.h` — конфиг.
+- `CMakeLists.txt.patched` — патч для нативной сборки.
+- `CMakeLists.txt.orig` — оригинал.
+- `build_native.sh` — скрипт сборки.
+- `README.md` — инструкция.
+
+### Что это даёт проекту
+
+- **NPU-детекция** — теперь на **YOLO11s** (быстрее, точнее YOLOv5s).
+- **Готовый пайплайн** — можно пересобрать модель под **другие задачи** (pose, seg, depth — есть в `examples/yolo11_pose/`, `yolo11_seg/`, `yolo26_depth/`).
+- **Официальная поддержка** Allwinner — не самодельная конвертация.
+
 ## 🚧 Что осталось
 
 ### Ближайшее
@@ -1357,6 +1342,7 @@ destory npu finished.
 - **2026-10-01:** Ручное копирование на eMMC (обход бага `armbian-install`), отключение CQE (`max-frequency` 52 МГц), расширение eMMC до 29 ГБ, `TimeoutStopSec=5`, обработчик `SIGTERM` в `app.py`.
 - **2026-10-02:** GStreamer `tee` — запись без прерывания живого потока. Контейнер `.mkv` (matroskamux) — VFR сохранён.
 - **2026-10-03:** Переключение режима камеры (1080p30 ↔ 720p60) по кнопке WebRTC. RES-индикатор в OSD. Динамический FPS-лимит в `generate_frames`. Проверено с NPU и записью.
+- **2026-10-05:** YOLO11s сконвертирована в INT8 (`.nb` 6.6 МБ), C++ демо собрано нативно на Orange Pi, тест пройден (27 FPS, `dog: 92%`). Пайплайн: Allwinner Model Zoo v1.1.0 + ACUITY Toolkit 6.30.22 + Docker `ubuntu-npu:v2.0.10.2`. Папка `yolo11/` добавлена в репозиторий.
 ---
 
 **Последнее обновление:** 2026-10-03

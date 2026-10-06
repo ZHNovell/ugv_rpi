@@ -1,7 +1,12 @@
-![GitHub top language](https://img.shields.io/github/languages/top/effectsmachine/ugv_rpi) ![GitHub language count](https://img.shields.io/github/languages/count/effectsmachine/ugv_rpi)
-![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/effectsmachine/ugv_rpi)
-![GitHub repo size](https://img.shields.io/github/repo-size/effectsmachine/ugv_rpi) ![GitHub](https://img.shields.io/github/license/effectsmachine/ugv_rpi) ![GitHub last commit](https://img.shields.io/github/last-commit/effectsmachine/ugv_rpi)
 # PROJECT.md — Orange Pi 4 Pro UGV Robot
+
+![GitHub top language](https://img.shields.io/github/languages/top/ZHNovell/ugv_rpi)
+![GitHub language count](https://img.shields.io/github/languages/count/ZHNovell/ugv_rpi)
+![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/ZHNovell/ugv_rpi)
+![GitHub repo size](https://img.shields.io/github/repo-size/ZHNovell/ugv_rpi)
+![GitHub](https://img.shields.io/github/license/ZHNovell/ugv_rpi)
+![GitHub last commit](https://img.shields.io/github/last-commit/ZHNovell/ugv_rpi)
+
 
 ## 📋 Общая архитектура
 

@@ -882,7 +882,8 @@ socket.on('update', function(data) {
 ```ini
 [Unit]
 Description=UGV Robot App
-After=network.target
+After=network.target npu-server.service npu-pose-server.service
+Requires=npu-server.service npu-pose-server.service
 
 [Service]
 Type=simple
@@ -941,7 +942,7 @@ journalctl -u ugv.service -f
 | Color | 10305 | Детекция цвета |
 | Hand GS | 10306 | Жесты рук |
 | Auto | 10307 | Авто-режим |
-| MP Face | 10308 | MediaPipe Face |
+| MP Face | 10308 | MediaPipe Face (не работает — нет mediapipe) |
 | MP Pose | 10309 | NPU YOLO11_pose (17 keypoints) |
 
 ### Формат отправки (через `base_ctrl.py`)
@@ -1167,15 +1168,22 @@ f['fb'][f'base_voltage']:base.base_data['v'] if base.base_data else 0,
 
 ### 📝 Обновления в CSS
 
-**`templates/style.css`:**
+**`templates/style.css`** — актуальный вид (см. также раздел «🌐 Веб-интерфейс»):
 
 ```css
-.video img{
+.video {
     width: 960px;
     height: 540px;
+    overflow: hidden;
+}
+.video img {
+    width: 100%;
+    height: 100%;
     border-radius: 4px;
     object-fit: contain;
 }
+main { width: 1600px; margin: auto; }
+.box1 .section_video { width: 1000px; margin-right: 10px; }
 ```
 ## 🆕 Обновления (2026-10-01)
 
@@ -1314,7 +1322,8 @@ signal.signal(signal.SIGINT, cleanup_handler)
 - ✅ **Запись видео** работает в обоих режимах (файл .mkv, 720p, 60 fps реальных).
 - ✅ **FPS в OSD** меняется (30 ↔ 57-60).
 
-## YOLO11s на NPU Allwinner A733 (INT8, 27 FPS) **не актуально, но кто-то может исплользовать и эту модель.**
+## 🆕 Обновления (2026-10-05): YOLO11s на NPU Allwinner A733 (INT8, 27 FPS)
+> ⚠️ **Не актуально** — заменено на YOLO26s (см. выше). Оставлено как история.
 
 **Итог:** YOLO11s успешно сконвертирована в INT8, собирается и работает на NPU A733 (Orange Pi 4 Pro).
 **Скорость:** ~37 мс на инференс (~27 FPS) + ~5 мс постобработка на CPU.
@@ -1428,8 +1437,8 @@ detection num: 3
 - [x] **`TimeoutStopSec=5`**, **`KillMode=control-group`**, **`SendSIGKILL=yes`**.
 - [x] **Обработчик `SIGTERM`** в `app.py`.
 - [x] **Запись видео с параллельным потоком** — GStreamer `tee` + `avenc_mjpeg` + `.mkv`.
-- [x] **YOLOv26** — более точная модель - выполнено досрочно.
-- [x] **YOLO11_pose** — 17 keypoints, скелет — выполнено досрочно.
+- [x] **YOLO26s** — более точная модель, INT8 (PCQ), 29 FPS.
+- [x] **YOLO11_pose** — 17 keypoints, скелет, 28 FPS.
 - [ ] **YOLO26_depth** — карта глубины (из Model Zoo v1.1.0).
 - [ ] **YOLO11_seg** — сегментация.
 - [ ] **eMMC 200 МГц** — вернуть скорость (с бэкапом).

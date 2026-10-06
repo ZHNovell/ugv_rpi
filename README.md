@@ -8,7 +8,7 @@
 ![GitHub last commit](https://img.shields.io/github/last-commit/ZHNovell/ugv_rpi)
 <img width="1088" height="721" alt="261006200253" src="https://github.com/user-attachments/assets/368fbf34-2087-4e6b-b819-b5fca5f83acd" />
 
-# PROJECT.md — Orange Pi 4 Pro UGV Robot
+# Orange Pi 4 Pro UGV Robot
 
 ## 📋 Общая архитектура
 

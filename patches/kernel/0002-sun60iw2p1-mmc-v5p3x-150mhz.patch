@@ -1,0 +1,31 @@
+diff --git a/arch/arm64/boot/dts/allwinner/sun60iw2p1.dtsi b/arch/arm64/boot/dts/allwinner/sun60iw2p1.dtsi
+index 64b813e7d..be7c3fa94 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60iw2p1.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun60iw2p1.dtsi
+@@ -4353,7 +4353,7 @@ ufs: ufs@04520000 {
+ 		};
+ 
+ 		sdc2: sdmmc@4022000 {
+-			compatible = "allwinner,sunxi-mmc-v4p6x";
++			compatible = "allwinner,sunxi-mmc-v5p3x";
+ 			device_type = "sdc2";
+ 			reg = <0x0 0x04022000 0x0 0x1000>;
+ 			interrupts = <GIC_SPI 163 IRQ_TYPE_LEVEL_HIGH>;
+@@ -4377,8 +4377,7 @@ sdc2: sdmmc@4022000 {
+ 			cap-cmd23;
+ 			mmc-cache-ctrl;
+ 			non-removable;
+-			/*max-frequency = <200000000>;*/
+-			max-frequency = <50000000>;
++			max-frequency = <150000000>;
+ 			cap-erase;
+ 			mmc-high-capacity-erase-size;
+ 			no-sdio;
+@@ -4417,6 +4416,7 @@ sdc2: sdmmc@4022000 {
+ 			/*vqmc = "";*/
+ 			/*vdmc = "";*/
+ 			/*sunxi-power-save-mode;*/
++			sunxi-dly-208M = <0xff 0x01 0xff 0xff 0xff 0xff>;
+ 			status = "okay";
+ 		};
+ 

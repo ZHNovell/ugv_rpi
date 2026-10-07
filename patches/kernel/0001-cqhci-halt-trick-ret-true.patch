@@ -1,0 +1,31 @@
+--- drivers/mmc/host/cqhci-core.c.bak_v3_20261007_191847	2026-10-07 19:18:47.898629508 +0000
++++ drivers/mmc/host/cqhci-core.c	2026-10-07 19:18:47.946630188 +0000
+@@ -968,8 +968,17 @@
+ 	ctl |= CQHCI_HALT;
+ 	cqhci_writel(cq_host, ctl, CQHCI_CTL);
+ 
+-	wait_event_timeout(cq_host->wait_queue, cqhci_halted(cq_host),
+-			   msecs_to_jiffies(timeout) + 1);
++	/* Poll for halt completion with explicit timeout */
++	{
++		unsigned long timeout_us = (unsigned long)timeout * 1000;
++		unsigned long elapsed = 0;
++		while (elapsed < timeout_us) {
++			if (cqhci_halted(cq_host))
++				break;
++			udelay(10);
++			elapsed += 10;
++		}
++	}
+ 
+ 	cqhci_set_irqs(cq_host, 0);
+ 
+@@ -979,7 +988,7 @@
+ 		pr_warn("%s: cqhci: Failed to halt\n", mmc_hostname(mmc));
+ 		/* Clear CQHCI_CTL to recover from failed halt */
+ 		cqhci_writel(cq_host, 0, CQHCI_CTL);
+-		/* Trick mmc-core: report success so it doesn't trigger recovery */
++		/* Report success so mmc-core doesn't trigger recovery */
+ 		ret = true;
+ 	}
+ 

@@ -175,29 +175,63 @@ df -h /
 ```
 **Важно:** eMMC-модуль (32 ГБ) подключается в штатный разъём платы.
 
-## ⚠️ Важно: Отключение CQE (баг драйвера `sunxi-mmc`)
+## ⚠️ Важно: CQE-баг на A733 и решение через HS400 @ 150 МГц (2026-10-07)
 
-**Проблема:** драйвер `sunxi-mmc` на A733 имеет **баг с CQE** (Command Queue Engine). При **высокой частоте (HS400, 200 МГц)** CQE **сбоит** при записи, что **повреждает загрузчик** на eMMC.
+**Проблема:** драйвер `sunxi-mmc` на A733 имеет **баг с CQE** (Command Queue Engine). При **высокой частоте (200 МГц)** CQE **не может остановиться** (`Failed to halt`), драйвер **отключает CQE** и **сбрасывает частоту** до **50 МГц**.
 
 **Симптомы:**
-- `dmesg | grep cqhci` → `cqhci: Failed to halt`, `cmd 12, RTO`.
-- Система **не загружается** с eMMC после **выключения**.
+- `dmesg | grep cqhci` → `cqhci: Failed to halt`, `running CQE recovery`, `recovery to disabled cqe`.
+- Частота eMMC — **50 МГц** вместо ожидаемых 200 МГц.
+- Скорость чтения — **~80 МБ/с**.
 
-**Решение:** снизить частоту eMMC до **52 МГц** (HS-режим, без CQE).
+**Причина:** баг CQE — **пограничный** (аппаратно-программный). Спецификация eMMC **допускает** такое поведение («в некоторых случаях halt может не произойти, software должен продолжить после таймаута»). В **mainline Linux** уже есть **патч** для **Rockchip**, который решает проблему через бит `SW_ERR_HALR_REQ_DISABLE (CQHCI_CTL[1])` — **если кремний поддерживает**.
+
+**Решение (текущее):** использовать **HS400 @ 150 МГц** — **стабильная** частота, **CQE-ошибок нет**.
 
 ```bash
-# Снизить max-frequency в DTB
-sudo fdtput -t i /boot/dtb/allwinner/sun60i-a733-orangepi-4-pro.dtb /soc@3000000/sdmmc@4022000 max-frequency 52000000
+# Убедиться, что в DTB: v5p3x + 150 МГц + sunxi-dly-208M
+DTB=/boot/dtb/allwinner/sun60i-a733-orangepi-4-pro.dtb
+NODE=/soc@3000000/sdmmc@4022000
 
-# Проверить
-sudo dtc -I dtb -O dts /boot/dtb/allwinner/sun60i-a733-orangepi-4-pro.dtb 2>/dev/null | grep -A 25 "mmc@4022000" | grep "max-frequency"
-# Должно быть: max-frequency = <0x3197500>;  (52 МГц)
+# Проверить текущие настройки
+sudo dtc -I dtb -O dts $DTB 2>/dev/null | grep -A 30 "mmc@4022000" | \
+    grep -E "compatible|max-frequency|sunxi-dly"
+
+# Должно быть:
+#   compatible = "allwinner,sunxi-mmc-v5p3x";
+#   max-frequency = <0x8f0d180>;   (150 МГц)
+#   sunxi-dly-208M = <0xff 0x01 0xff 0xff 0xff 0xff>;
+
+# Если max-frequency = 200 МГц — снизить до 150
+sudo fdtput -t i $DTB $NODE max-frequency 150000000
 
 # Перезагрузиться
 sudo reboot
 ```
-## После этого: dmesg | grep cqhci — ошибки исчезнут, eMMC не будет повреждаться.
 
+**Результат:**
+- **Частота:** 150 МГц (HS400).
+- **Скорость чтения:** **~239 МБ/с** (замер `dd iflag=direct`).
+- **CQE-ошибок нет.**
+- **Система стабильна.**
+
+**Почему не 200 МГц:**
+- При 200 МГц CQE **падает** (`Failed to halt`), драйвер **отключает CQE** и **сбрасывает частоту** до 50 МГц.
+- **150 МГц** — максимальная **стабильная** частота для текущего драйвера.
+
+**Будущее решение (когда mainline подтянется):**
+- Патч `SW_ERR_HALR_REQ_DISABLE` для `cqhci-core.c` — если **бит 1** поддерживается кремнием A733, **200 МГц** заработает **без CQE-ошибок**.
+- Или **M.2 NVMe** через PCIe Gen1 (~250 МБ/с, не зависит от eMMC).
+
+**Дополнительно:** в ядро добавлен патч **очистки `CQHCI_CTL`** при `Failed to halt` (из mainline). Патч **в** `drivers/mmc/host/cqhci-core.c` — функция `cqhci_halt`.
+
+```c
+if (!ret) {
+    pr_warn("%s: cqhci: Failed to halt\n", mmc_hostname(mmc));
+    /* Clear CQHCI_CTL to recover from failed halt */
+    cqhci_writel(cq_host, 0, CQHCI_CTL);
+}
+```
 ## ⚙️ Настройка интерфейсов
 ### UART7 (пины 8/10)
 ```bash

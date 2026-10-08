@@ -62,3 +62,6 @@ yolo11_pose/build/
 
 # Результаты демо
 output_depth_heatmap.jpg
+
+# Результаты seg демо
+out_yolo11_seg.png

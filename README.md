@@ -1567,6 +1567,7 @@ cd /root/ugv_rpi/yolo26_depth/
 - `yolo26_depth/model/yolo26n-depth_int16_a733.nb` — запас.
 - `yolo26_depth/model/yolo26s-depth_int16_a733.nb` — точная (редко).
 - `yolo26_depth/model/rgb_00285.jpg` — тестовое изображение.
+
 **🚧 Что дальше:**
 - [ ] `npu_depth_server` — C++ сервер с UNIX-сокетом (по аналогии с `npu_server` для YOLO26s).
 - [ ] Python-клиент `npu_depth_client.py`.

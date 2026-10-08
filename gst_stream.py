@@ -2,6 +2,7 @@ import gi
 gi.require_version('Gst', '1.0')
 gi.require_version('GstApp', '1.0')
 from gi.repository import Gst, GstApp, GLib
+import re
 import threading
 import time
 import numpy as np
@@ -39,11 +40,73 @@ class GstStream:
         self.recording = False
         self.rec_lock = threading.Lock()
 
+
+    @staticmethod
+    def detect_max_fps(width, height, device=None):
+        """
+        Parse `v4l2-ctl --list-formats-ext` output line by line.
+        Return max FPS for given resolution in MJPG format.
+        Fallback: 30 if not found.
+        """
+        import subprocess
+        dev = device or "/dev/video0"
+        try:
+            out = subprocess.check_output(
+                ["v4l2-ctl", "-d", dev, "--list-formats-ext"],
+                encoding="utf-8", stderr=subprocess.DEVNULL
+            )
+        except Exception as e:
+            print(f"[GstStream] detect_max_fps: v4l2-ctl failed: {e}", flush=True)
+            return 30
+
+        target = f"{width}x{height}"
+        in_mjpg = False
+        current_size = None
+        max_fps = 0.0
+
+        for line in out.splitlines():
+            line = line.strip()
+            # Detect format section start
+            if line.startswith("[0]:") and "MJPG" in line:
+                in_mjpg = True
+                continue
+            if line.startswith("[") and "]" in line and "MJPG" not in line and "YUYV" not in line:
+                # another format section (but keep YUYV skip logic simple)
+                pass
+            if line.startswith("[") and ("'YUYV'" in line or "'RGB'" in line or "'GREY'" in line):
+                in_mjpg = False
+                continue
+            if not in_mjpg:
+                continue
+
+            # Size line: "Size: Discrete 1920x1080"
+            if line.startswith("Size: Discrete"):
+                current_size = line.replace("Size: Discrete", "").strip()
+                continue
+
+            # Interval line: "Interval: Discrete 0.033s (30.000 fps)"
+            if line.startswith("Interval: Discrete") and current_size == target:
+                # Extract fps from "(XX.XXX fps)"
+                if "(" in line and "fps)" in line:
+                    fps_str = line.split("(")[-1].split("fps)")[0].strip()
+                    try:
+                        fps_val = float(fps_str)
+                        if fps_val > max_fps:
+                            max_fps = fps_val
+                    except ValueError:
+                        pass
+
+        if max_fps > 0:
+            return int(round(max_fps))
+
+        print(f"[GstStream] detect_max_fps: {target} not found in MJPG, fallback 30", flush=True)
+        return 30
+
     # ---------- pipeline ----------
     def build_pipeline(self):
         pipeline_str = (
             f"v4l2src device={self.device} ! "
-            f"image/jpeg,width={self.width},height={self.height},framerate={self.fps}/1 ! "
+            f"image/jpeg,width={self.width},height={self.height} ! "
             f"jpegdec ! tee name=t "
             f"t. ! queue max-size-buffers=2 leaky=downstream ! "
             f"videoconvert ! video/x-raw,format=BGR ! "
@@ -102,8 +165,10 @@ class GstStream:
         self.running = False
         print("[GstStream] Stopped")
 
-    def switch_mode(self, width, height, fps):
-        """Restart pipeline with new width/height/fps. Viewing briefly interrupts (~0.5s)."""
+    def switch_mode(self, width, height, fps=None):
+        """Restart pipeline with new width/height. Auto-detect max FPS if not given."""
+        if fps is None:
+            fps = self.detect_max_fps(width, height, self.device)
         print(f"[GstStream] switching to {width}x{height}@{fps}", flush=True)
         was_running = self.running
         if self.running:

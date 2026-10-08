@@ -603,24 +603,28 @@ class OpencvFuncs():
         self.picture_capture_flag = True
 
     def toggle_camera_mode(self):
-        """Switch camera between 1080p30 and 720p60."""
+        """Switch camera between 1080 and 720. FPS auto-detected per resolution."""
         if self.gst_stream is None:
             print("[cv_ctrl] gst_stream not available, cannot switch mode", flush=True)
             return
         if self.video_record_status_flag:
             print("[cv_ctrl] cannot switch camera while recording", flush=True)
             return
-        if self.camera_mode == '1080p30':
-            new_w, new_h, new_fps = 1280, 720, 60
-            self.camera_mode = '720p60'
+        # Determine target resolution by current width (not by hardcoded name)
+        cur_w = getattr(self.gst_stream, 'width', 1920)
+        if cur_w == 1920:
+            new_w, new_h = 1280, 720
         else:
-            new_w, new_h, new_fps = 1920, 1080, 30
-            self.camera_mode = '1080p30'
-        print(f"[cv_ctrl] toggle_camera_mode -> {self.camera_mode}", flush=True)
+            new_w, new_h = 1920, 1080
         try:
-            self.gst_stream.switch_mode(new_w, new_h, new_fps)
+            self.gst_stream.switch_mode(new_w, new_h)  # fps auto-detect
         except Exception as e:
             print(f"[cv_ctrl] switch_mode error: {e}", flush=True)
+            return
+        # Build dynamic camera_mode string (e.g. "720p30", "1080p30", "720p60")
+        real_fps = getattr(self.gst_stream, 'fps', 30)
+        self.camera_mode = f"{new_h}p{real_fps}"
+        print(f"[cv_ctrl] toggle_camera_mode -> {self.camera_mode}", flush=True)
 
     def video_record(self, input_cmd):
         print(f"[cv_ctrl] video_record called with {input_cmd}", flush=True)

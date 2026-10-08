@@ -601,7 +601,7 @@ socket.on('update', function(data) {
         try {
             var resEl = document.getElementById("res_mode");
             if (resEl && typeof camera_mode !== 'undefined' && data[camera_mode] !== undefined) {
-                resEl.innerHTML = (data[camera_mode] == '1') ? '720p60' : '1080p30';
+                resEl.innerHTML = data[camera_mode];
             }
         } catch (e) { /* ignore */ }
 

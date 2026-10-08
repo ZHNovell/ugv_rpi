@@ -165,8 +165,8 @@ def generate_frames():
             cvf.video_fps = fps_frames / (now_check - fps_start)
             fps_start = now_check
             fps_frames = 0
-        # cap MJPEG stream to current camera mode (30 or 60 FPS)
-        target_fps = 60.0 if getattr(cvf, 'camera_mode', '1080p30') == '720p60' else 30.0
+        # cap MJPEG stream to real camera FPS (auto-detected per resolution)
+        target_fps = float(getattr(getattr(cvf, 'gst_stream', None), 'fps', 30) or 30)
         target_dt = 1.0 / target_fps
         last_t += target_dt
         now = time.time()
@@ -552,7 +552,7 @@ def update_data_websocket_single():
             f['fb']['video_fps']:   cvf.video_fps,
             f['fb']['cv_movtion_mode']: cvf.cv_movtion_lock,
             f['fb']['base_light']:  base.base_light_status,
-            f['fb']['camera_mode']: '1' if getattr(cvf, 'camera_mode', '1080p30') == '720p60' else '0'
+            f['fb']['camera_mode']: getattr(cvf, 'camera_mode', '1080p30')
         }
         socketio.emit('update', socket_data, namespace='/ctrl')
     except Exception as e:

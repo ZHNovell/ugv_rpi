@@ -991,10 +991,10 @@ cmdline_ctrl('base -c {"T":10304}')
 # → UART7: {"T":10304}\n
 ```
 
-### 📷 USB-камера (Logitech C920 HD Pro)
+### 📷 USB-камера (универсальная, UVC)
 
 **Подключение:**
-- Камера подключена в USB 2.0 порт Orange Pi 4 Pro.
+- Камера подключается в USB-порт Orange Pi 4 Pro.
 - Определяется как `/dev/video0` и `/dev/video1`.
 - Модуль `uvcvideo` загружается автоматически.
 
@@ -1003,14 +1003,9 @@ cmdline_ctrl('base -c {"T":10304}')
 ```bash
 # Список устройств
 v4l2-ctl --list-devices
-# HD Pro Webcam C920 (usb-sunxi-ehci-1.1):
-#         /dev/video0
-#         /dev/video1
 
 # Поддерживаемые форматы
 v4l2-ctl -d /dev/video0 --list-formats-ext
-# YUYV (4:2:2): до 1920x1080 @ 5 FPS
-# MJPG (Motion-JPEG): до 1920x1080 @ 30 FPS
 
 # Тест захвата кадра
 fswebcam -d /dev/video0 --no-banner -r 1920x1080 -S 5 ./test.jpg
@@ -1045,6 +1040,47 @@ def usb_camera_detection(self):
 ```
 
 **Преимущества:** работает для **любой** UVC-камеры, независимо от имени в `lsusb`.
+
+## 🎥 Универсальный auto-detect FPS (2026-10-08)
+**Проблема:** разные камеры поддерживают разные FPS для разных разрешений. Например:
+- UGREEN SM831: 1080p30, 4K30 (нет 60 fps).
+- Vitade (дешёвая): 1080p30, 720p30 (нет 60 fps).
+- WSD-p8002: 1080p60, 4K30.
+
+Если жёстко задать 720p60 — на камерах без 60 fps пайплайн GStreamer **не запускается**, видео пропадает.
+**Решение:** при переключении режима камера **сама определяет максимальный FPS** для выбранного разрешения через `v4l2-ctl --list-formats-ext`.
+
+**`GstStream.detect_max_fps(width, height, device)`:**
+- Парсит вывод `v4l2-ctl --list-formats-ext` (построчно, без регулярок).
+- Находит секцию **MJPG**.
+- Ищет нужное разрешение (`1920x1080`, `1280x720`).
+- Возвращает **максимальный** FPS для него.
+- Fallback — 30, если не найдено.
+**`GstStream.switch_mode(width, height, fps=None)`:**
+- Если `fps` не задан — вызывает `detect_max_fps`.
+- Пересоздаёт пайплайн с найденным FPS.
+- Сохраняет `self.fps` — реальный FPS.
+
+**`cv_ctrl.toggle_camera_mode()`:**
+- Определяет целевое разрешение по текущему `self.gst_stream.width` (1920 → 1280, иначе → 1920).
+- Вызывает `switch_mode(new_w, new_h)` **без fps**.
+- Формирует `self.camera_mode` динамически: `f"{height}p{real_fps}"` (например, `1080p30`, `720p30`, `720p60`).
+**`app.py` (generate_frames):**
+- FPS-лимит берётся из `cvf.gst_stream.fps` (реальный), а не из хардкода.
+
+**OSD:**
+- `camera_mode` передаётся в websocket **как строка** (`'720p30'`).
+- `control.js` выводит её напрямую в `res_mode` (без маппинга `'1' → '720p60'`).
+**Результат:**
+- Любая UVC-камера работает с максимальным FPS для каждого разрешения.
+- Нет пропадания видео при переключении.
+- OSD показывает **реальный** режим (например, `720p30`, а не `720p60`).
+
+**Файлы:**
+- `gst_stream.py` — `detect_max_fps`, `switch_mode(width, height, fps=None)`.
+- `cv_ctrl.py` — `toggle_camera_mode` без хардкода.
+- `app.py` — FPS-лимит из `gst_stream.fps`.
+- `templates/control.js` — `res_mode` = `data[camera_mode]` напрямую.
 
 ### 🎥 Запись видео — финальное решение (2026-10-02)
 

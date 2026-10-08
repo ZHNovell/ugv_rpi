@@ -1471,6 +1471,110 @@ detection num: 3
 - **Готовый пайплайн** — можно пересобрать модель под **другие задачи** (pose, seg, depth — есть в `examples/yolo11_pose/`, `yolo11_seg/`, `yolo26_depth/`).
 - **Официальная поддержка** Allwinner — не самодельная конвертация.
 
+## 🧠 YOLO26 Depth на NPU (карта глубины) (2026-10-08)
+
+**Итог:** модель YOLO26 depth (nano) сконвертирована в NBG, работает на NPU A733. **65 мс** на инференс (~11 FPS) с квантизацией PCQ. Заменяет монокулярную оценку глубины через тяжёлые CPU-модели. Дополняет лидар D500 — depth даёт объём, лидар — точные расстояния в срезе.
+### Что такое YOLO26 depth
+
+Монокулярная оценка глубины по **одному RGB-кадру**. Выход — **карта глубины** (heatmap) 768×768, значения в метрах. Позволяет:
+- видеть препятствия выше/ниже среза лидара,
+- дополнять SLAM (стекло, прозрачные поверхности),
+- давать роботу «объёмное» зрение для объезда.
+### Пайплайн конвертации
+
+1. **Скачать** `yolo26n-depth.pt` (Ultralytics, 12.4 МБ) или `yolo26s-depth.pt` (s-версия).
+2. **Экспорт ONNX** через Ultralytics (venv в VirtualBox):
+   - nano: `imgsz=768, opset=14, simplify=True`.
+   - результат: `yolo26n-depth.onnx` (~20 МБ).
+3. **Docker ACUITY** (`ubuntu-npu:v2.0.10.2`, Model Zoo v1.1.0):
+   - `./pegasus_import.sh yolo26n-depth`
+   - `./pegasus_quantize.sh yolo26n-depth pcq 10` ← **PCQ (INT8)**, не int16.
+   - `./pegasus_export_ovx_nbg.sh yolo26n-depth pcq a733`
+4. **Результат:** `yolo26n-depth_pcq_a733.nb` (10.4 МБ).
+
+**Важно:** `config_yml.py` из `examples/yolo26_depth/convert_model/` универсальный — mean=[0,0,0], scale=[1/255,1/255,1/255], IMAGE_RGB. Для nano и s-версии — одинаковые параметры (обе обучались на NYU Depth V2).
+### Сравнение вариантов (тесты на `rgb_00285.jpg`, A733)
+
+| Модель | Квантизация | Размер .nb | Run time | FPS | Качество |
+|---|---|---|---|---|---|
+| **yolo26s-depth** | int16 | 21.3 МБ | 244 мс | 4.1 | 🟢 высокое |
+| **yolo26n-depth** | int16 | 9.7 МБ | 158 мс | 5.3 | 🟢 приемлемое |
+| **yolo26n-depth** | **PCQ** | **10.4 МБ** | **65 мс** | **~11** | 🟢 **приемлемое** |
+| yolo26s-depth | PCQ | — | — | — | 🔴 шумное (отпадает) |
+
+**Ключевой вывод:** nano + PCQ — **лучший баланс** (65 мс, ~11 FPS, приемлемое качество). s + PCQ даёт шум из-за `Exp()` в конце модели (INT8 усиливает ошибку экспоненциально).
+### Почему PCQ для nano работает, а для s — нет
+
+YOLO26-depth имеет **`Exp()` на выходе** — малейшая ошибка в log-глубине экспоненциально усиливается при INT8-квантизации.
+- **s-модель** (больше параметров) накапливает больше ошибок → PCQ шумит.
+- **n-модель** (меньше параметров) — квантуется лучше → PCQ даёт приемлемое качество.
+
+**Отсюда:** int16 для точности (медленно), PCQ для скорости (для nano — с приемлемым качеством).
+### Стратегия использования
+
+**Основной режим:** `yolo26n-depth_pcq_a733.nb` — 65 мс, ~11 FPS.
+
+**Резерв (если понадобится точность):**
+- `yolo26n-depth_int16_a733.nb` — 158 мс, запас.
+- `yolo26s-depth_int16_a733.nb` — 244 мс, для редкого уточнения.
+
+**Не использовать:** `yolo26s-depth_pcq` — шумно.
+
+**Комбо-режим (резерв на будущее):** nano-PCQ постоянно + s-int16 раз в 1-2 сек для уточнения. Если реальные испытания покажут, что одного nano не хватает — включим.
+### Демо на Orange Pi
+
+```bash
+cd /root/ugv_rpi/yolo26_depth/
+
+LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733 \
+./yolo26_depth_demo \
+  -nb model/yolo26n-depth_pcq_a733.nb \
+  -i model/rgb_00285.jpg \
+  -l 1 -m 10
+```
+**Вывод:**
+```text
+input  0 dim 3 768 768 1
+output 0 dim 768 768 1 1
+create network 0: 10405 us
+prepare network: 5349 us
+run time for this network 0: 65368 us  ← 65 мс
+depth postprocess time: 3.33 ms
+saved heatmap: output_depth_heatmap.jpg
+```
+### Нативная сборка
+
+```bash
+cd /root/ugv_rpi/yolo26_depth/
+./build_native.sh
+```
+**Ключевые фиксы:**
+1. `SYS_ARCH=linux_aarch64` — принудительно.
+2. OpenCV через `pkg-config opencv4` — не `find_package`.
+3. Убрать `_GLIBCXX_USE_CXX11_ABI=0`.
+4. `MODEL_ZOO_HOME_DIR` — абсолютный путь.
+5. Собирать только `yolo26_depth_demo` из 3 файлов (`main.cpp`, `yolo26_depth_pre.cpp`, `yolo26_depth_post.cpp`).
+6. `build_native.sh` — собирает в своей папке (не копирует в Model Zoo).
+### Файлы в репозитории
+
+- `yolo26_depth/main.cpp` — демо.
+- `yolo26_depth/yolo26_depth_pre.cpp` — letterbox 768×768.
+- `yolo26_depth/yolo26_depth_post.cpp` — heatmap + JET colormap.
+- `yolo26_depth/model_config.h` — INPUT=768, OUTPUT=768.
+- `yolo26_depth/CMakeLists.txt.patched` — нативная сборка.
+- `yolo26_depth/build_native.sh` — скрипт сборки.
+- `yolo26_depth/model/yolo26n-depth_pcq_a733.nb` — рабочая модель.
+- `yolo26_depth/model/yolo26n-depth_int16_a733.nb` — запас.
+- `yolo26_depth/model/yolo26s-depth_int16_a733.nb` — точная (редко).
+- `yolo26_depth/model/rgb_00285.jpg` — тестовое изображение.
+**🚧 Что дальше:**
+- [ ] `npu_depth_server` — C++ сервер с UNIX-сокетом (по аналогии с `npu_server` для YOLO26s).
+- [ ] Python-клиент `npu_depth_client.py`.
+- [ ] Интеграция с `cv_ctrl.py` — кнопка DEPTH в веб-интерфейсе.
+- [ ] Комбо-режим (nano-PCQ + s-int16) — если понадобится.
+
+
+  
 ## 🚧 Что осталось
 
 ### Ближайшее

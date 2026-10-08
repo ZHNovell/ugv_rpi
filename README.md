@@ -1575,6 +1575,111 @@ cd /root/ugv_rpi/yolo26_depth/
 - [ ] Комбо-режим (nano-PCQ + s-int16) — если понадобится.
 
 
+## 🎨 YOLO11 Segmentation на NPU (маски объектов)
+
+**Итог:** модель YOLO11s-seg сконвертирована в NBG, работает на NPU A733. **45 мс** на инференс (~22 FPS) с квантизацией uint8. Выделяет пиксельные маски каждого объекта (instance segmentation).
+### Что такое YOLO11-seg
+
+**Instance segmentation** — модель не просто рисует рамку, а **выделяет пиксели каждого объекта** (маска-полигон). Для каждого найденного объекта — контур.
+
+**Зачем нам:**
+- Точные границы объектов (не «где-то тут человек», а «вот эти пиксели»).
+- Форма объекта (площадь, ориентация).
+- Для демонстраций — красиво и наглядно.
+- Для взаимодействия — знать, где именно объект.
+### Пайплайн конвертации
+
+1. **Скачать** `yolo11s-seg_10.onnx` (Allwinner, 40 МБ) — **уже обрезанный через `onnx_extract.py`** (10 выходов: bbox + class + mask coeffs + protos × 3 уровня + protos).
+2. **Docker ACUITY** (`ubuntu-npu:v2.0.10.2`, Model Zoo v1.1.0):
+   - `./pegasus_import.sh yolo11s-seg_10`
+   - `./pegasus_quantize.sh yolo11s-seg_10 uint8 12` ← **uint8**, не int16/pcq.
+   - `./pegasus_export_ovx_nbg.sh yolo11s-seg_10 uint8 a733`
+3. **Результат:** `yolo11s-seg_10_uint8_a733.nb` (7.3 МБ).
+
+**Важно:** в README Allwinner указано, что **постобработка seg при 8bit даёт потери точности**, поэтому её вынесли на CPU (C++). Это и есть смысл обрезки через `onnx_extract.py`.
+### Результаты теста (dog.jpg)
+```
+| Метрика | Значение |
+|---|---|
+| **run time (inference)** | **45.2 мс** (~22 FPS) |
+| **post process** | 11 мс |
+| **Размер .nb** | 7.3 МБ |
+```
+
+**Детекции:**
+
+```
+detection num: 3
+1: 95%, [ 127, 125, 568, 420], bicycle
+16: 96%, [ 132, 221, 311, 541], dog
+2: 85%, [ 466, 75, 691, 172], car
+```
+```text
+**Качество:** маски чёткие, объекты выделены точно. Заметно лучше, чем PCQ у depth (у seg нет `exp()` на выходе — квантизация не убивает точность).
+```
+### Сравнение со всеми моделями проекта
+
+| Модель | Квантизация | Run time | FPS | Качество |
+|---|---|---|---|---|
+| YOLO26s (детекция) | PCQ | ~35 мс | 29 | 🟢 |
+| YOLO11_pose | uint8 | ~62 мс | 16 | 🟢 |
+| **YOLO11_seg** | **uint8** | **45 мс** | **~22** | 🟢 |
+| YOLO26n_depth | PCQ | 65 мс | ~11 | 🟢 |
+
+Seg работает **быстрее**, чем pose и depth — почти как детекция.
+
+### Демо на Orange Pi
+
+```bash
+cd /root/ugv_rpi/yolo11_seg/
+
+LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733 \
+./yolo11_seg_demo \
+  -nb model/yolo11s-seg_10_uint8_a733.nb \
+  -i model/dog.jpg \
+  -l 1 -m 10
+```
+```text
+input  0 dim 3 640 640 1
+output 0 dim 80 80 64 1   (bbox)
+output 1 dim 80 80 80 1   (class)
+output 2 dim 80 80 32 1   (mask coeffs)
+...
+output 9 dim 160 160 32 1 (protos)
+run time for this network 0: 45220 us  ← 45 мс
+post process time : 11 ms
+detection num: 3
+```
+### Нативная сборка
+
+```bash
+cd /root/ugv_rpi/yolo11_seg/
+./build_native.sh
+```
+**Ключевые фиксы:**
+1. `SYS_ARCH=linux_aarch64` — принудительно.
+2. OpenCV через `pkg-config opencv4`.
+3. Убрать `_GLIBCXX_USE_CXX11_ABI=0`.
+4. `MODEL_ZOO_HOME_DIR` — абсолютный путь.
+5. Собирать только `yolo11_seg_demo` из 3 файлов (`main.cpp`, `yolo11_seg_10_pre.cpp`, `yolo11_seg_10_post.cpp`).
+6. `build_native.sh` — собирает в своей папке.
+
+### Файлы в репозитории
+
+- `yolo11_seg/main.cpp` — демо.
+- `yolo11_seg/yolo11_seg_10_pre.cpp` — letterbox 640×640.
+- `yolo11_seg/yolo11_seg_10_post.cpp` — маски + bbox.
+- `yolo11_seg/model_config.h` — INPUT=640, 10 выходов.
+- `yolo11_seg/CMakeLists.txt.patched` — нативная сборка.
+- `yolo11_seg/build_native.sh` — скрипт сборки.
+- `yolo11_seg/model/yolo11s-seg_10_uint8_a733.nb` — модель.
+- `yolo11_seg/model/dog.jpg` — тестовое изображение.
+
+**🚧 Что дальше:**
+- [ ] `npu_seg_server` — C++ сервер с UNIX-сокетом (по аналогии с `npu_server`).
+- [ ] Python-клиент `npu_seg_client.py`.
+- [ ] Интеграция с `cv_ctrl.py` — кнопка SEG в веб-интерфейсе.
+
   
 ## 🚧 Что осталось
 

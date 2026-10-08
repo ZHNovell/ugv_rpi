@@ -1221,22 +1221,6 @@ main { width: 1600px; margin: auto; }
 ```bash
 sudo dd if=/dev/mmcblk1 of=/dev/mmcblk0 bs=1M count=20 conv=notrunc
 ```
-### ⚠️ Отключение CQE (баг драйвера sunxi-mmc)
-**Проблема:** драйвер sunxi-mmc на A733 имеет баг с CQE. При HS400 (200 МГц) CQE сбоит при записи, что повреждает загрузчик на eMMC.
-
-**Симптомы:**
-
-```dmesg | grep cqhci → cqhci: Failed to halt, cmd 12, RTO.```
-
-Система не загружается с eMMC после выключения.
-
-**Решение:** снизить частоту eMMC до 52 МГц (HS-режим, без CQE):
-
-```bash
-sudo fdtput -t i /boot/dtb/allwinner/sun60i-a733-orangepi-4-pro.dtb /soc@3000000/sdmmc@4022000 max-frequency 52000000
-```
-**Результат:** dmesg | grep cqhci — ошибки исчезают, eMMC не повреждается.
-
 ### 📏 Расширение eMMC до 29 ГБ
 
 **Проблема:** после ручного копирования раздел eMMC — **7.2 ГБ** (как SD).

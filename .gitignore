@@ -44,3 +44,21 @@ yolo11/install/
 # Test outputs
 out_yolo11.png
 *.nb.bak
+
+# Бэкапы с датой (2026-10-08)
+*.bak_*
+
+# Главные README и PROJECT правятся только через GitHub Web
+/README.md
+/PROJECT.md
+/ROADMAP.md
+
+# Build артефакты (cmake)
+yolo11_seg/build/
+yolo26_depth/build/
+yolo11/build/
+yolo26/build/
+yolo11_pose/build/
+
+# Результаты демо
+output_depth_heatmap.jpg

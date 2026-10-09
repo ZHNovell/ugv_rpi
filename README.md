@@ -1713,6 +1713,78 @@ cd /root/ugv_rpi/yolo11_seg/
 **Подсветка активной кнопки:** автоматически через Socket.IO (событие `update`).
 
 
+## 💾 NVMe SSD + SPI Flash (2026-10-09)
+
+**Итог:** система **загружается с NVMe** (570 МБ/с) **без eMMC и без SD-карты**. U-Boot прошит в **SPI Flash** с патчем питания (`dc1sw1`). eMMC — **бэкап** (лежит на полке).
+### Что сделано
+
+1. **SPI Flash прошит** — U-Boot с патчем `pcie3v3_supply = "dc1sw1"` (вместо `dc1sw2`).
+2. **Система перенесена на NVMe** — `rsync` + правка `armbianEnv.txt` (UUID NVMe) + `/etc/fstab`.
+3. **NVMe работает на Gen3** — 8.0 GT/s PCIe, **570 МБ/с** (было 205 МБ/с на eMMC).
+4. **eMMC вынута** — загрузка идёт **SPI → NVMe**.
+### Порядок загрузки
+```text
+BootROM: SD → eMMC → SPI → USB
+U-Boot (boot_targets): SD → eMMC → NVMe → USB
+```
+### Причина, почему U-Boot не видел NVMe
+
+**Питание M.2 слота.** U-Boot включал **не тот ключ** 3.3 В: `dc1sw2` вместо `dc1sw1`. Слот был **обесточен** → PCIe-линк **не тренировался** → NVMe **не определялся**.
+
+**Linux не замечал** — ядро помечает **оба** ключа (`dc1sw1`, `dc1sw2`) как `regulator-always-on`, поэтому включает **оба**. NVMe «оживал» при загрузке ядра — и казалось, что нужна SD-карта.
+
+**Патч:** `pcie3v3_supply = "dc1sw1"` (в `board-uboot.dts`).
+### Как повторить
+
+**1. Сборка U-Boot с патчем (VirtualBox):**
+```bash
+cd ~/orangepi-build
+git clone https://github.com/TblP/orangepi-uboot-fix.git /tmp/uboot-fix
+mkdir -p userpatches/u-boot/u-boot-sunxi/
+cp /tmp/uboot-fix/patches/0001-orangepi4pro-pcie-3v3-dc1sw1.patch userpatches/u-boot/u-boot-sunxi/
+sudo ./build.sh BOARD=orangepi4pro BRANCH=current RELEASE=jammy BUILD_OPT=u-boot KERNEL_CONFIGURE=no CLEAN_LEVEL=make
+```
+**2. Установка на Orange Pi:**
+```bash
+sudo dpkg -r linux-u-boot-orangepi4pro-vendor
+sudo dpkg -i linux-u-boot-current-orangepi4pro_1.1.0_arm64.deb
+sudo dpkg -r linux-u-boot-orangepi4pro-vendor
+sudo dpkg -i linux-u-boot-current-orangepi4pro_1.1.0_arm64.deb
+```
+**3. Прошивка SPI:**
+```bash
+sudo dd if=/dev/mtd0 of=/root/spi_backup_$(date +%Y%m%d_%H%M%S).bin bs=1M count=16
+sudo flash_erase /dev/mtd0 0 50
+sudo mtd_debug write /dev/mtd0 0 $(stat --format="%s" /usr/lib/linux-u-boot-current-orangepi4pro_1.1.0_arm64/boot0_spinor_a733.fex) /usr/lib/linux-u-boot-current-orangepi4pro_1.1.0_arm64/boot0_spinor_a733.fex
+sudo mtd_debug write /dev/mtd0 262144 $(stat --format="%s" /usr/lib/linux-u-boot-current-orangepi4pro_1.1.0_arm64/boot_package.fex) /usr/lib/linux-u-boot-current-orangepi4pro_1.1.0_arm64/boot_package.fex
+sudo sync
+```
+**4. Перенос системы на NVMe:**
+```bash
+sudo parted /dev/nvme0n1 mklabel gpt
+sudo parted /dev/nvme0n1 mkpart primary ext4 0% 100%
+sudo mkfs.ext4 -F /dev/nvme0n1p1
+sudo mkdir -p /mnt/nvme && sudo mount /dev/nvme0n1p1 /mnt/nvme
+sudo rsync -aAXHv --exclude={/dev/*,/proc/*,/sys/*,/tmp/*,/run/*,/mnt/*,/media/*,/lost+found} / /mnt/nvme/
+sudo sed -i 's|^rootdev=.*|rootdev=UUID=<UUID_NVME> rootdelay=5|' /mnt/nvme/boot/armbianEnv.txt
+sudo sed -i 's|<UUID_EMMC>|<UUID_NVME>|g' /mnt/nvme/etc/fstab
+sudo sync && sudo umount /mnt/nvme
+```
+**5. Выключить, вынуть eMMC, включить.**
+### Результат
+```text
+$ findmnt -no SOURCE,UUID /
+/dev/nvme0n1p1 e4384603-9cf2-4342-ba68-bb64e3e921e4
+
+$ cat /sys/bus/pci/devices/0000:01:00.0/current_link_speed
+8.0 GT/s PCIe
+
+$ df -h /
+/dev/nvme0n1p1 117G 11G 101G 10% /
+```
+**Скорость:** 570 МБ/с (NVMe Gen3 x1) vs 205 МБ/с (eMMC).
+**eMMC:** бэкап (лежит на полке). При необходимости — вставить, загрузиться, `git pull`.
+
 
   
 ## 🚧 Что осталось
@@ -1807,10 +1879,13 @@ cd /root/ugv_rpi/yolo11_seg/
   - `config.yaml`: `cv_depth: 10310`, `cv_seg: 10311`.
   - `npu-seg-server.service` + `npu-depth-server.service` (systemd, автозапуск).
   - Итог: **4 NPU-сервиса** работают параллельно (детекция, поза, глубина, сегментация).
+- **2026-10-09:** NVMe SSD + SPI Flash. U-Boot с патчем `dc1sw1` прошит в SPI. Система перенесена на NVMe (570 МБ/с, Gen3). eMMC вынута (бэкап). Загрузка: SPI → NVMe.
+
+
 
 ---
 
-**Последнее обновление:** 2026-10-06
+**Последнее обновление:** 2026-10-09
 
 **PROJECT:** [PROJECT.md](https://github.com/ZHNovell/ugv_rpi/blob/main/PROJECT.md) 
 **ROADMAP:** [PROJECT.md](https://github.com/ZHNovell/ugv_rpi/blob/main/ROADMAP.md) 

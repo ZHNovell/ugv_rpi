@@ -978,6 +978,9 @@ journalctl -u ugv.service -f
 | Auto | 10307 | Авто-режим |
 | MP Face | 10308 | MediaPipe Face (не работает — нет mediapipe) |
 | MP Pose | 10309 | NPU YOLO11_pose (17 keypoints) |
+| Depth | 10310 | NPU YOLO26n_depth (карта глубины) |
+| Seg | 10311 | NPU YOLO11_seg (маски) |
+| ArUco | 10312 | ArUco-маркеры (OpenCV CPU, ±2 см) |
 
 ### Формат отправки (через `base_ctrl.py`)
 

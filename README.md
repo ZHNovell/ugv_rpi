@@ -1569,9 +1569,6 @@ cd /root/ugv_rpi/yolo26_depth/
 - `yolo26_depth/model/rgb_00285.jpg` — тестовое изображение.
 
 **🚧 Что дальше:**
-- [ ] `npu_depth_server` — C++ сервер с UNIX-сокетом (по аналогии с `npu_server` для YOLO26s).
-- [ ] Python-клиент `npu_depth_client.py`.
-- [ ] Интеграция с `cv_ctrl.py` — кнопка DEPTH в веб-интерфейсе.
 - [ ] Комбо-режим (nano-PCQ + s-int16) — если понадобится.
 
 
@@ -1675,10 +1672,47 @@ cd /root/ugv_rpi/yolo11_seg/
 - `yolo11_seg/model/yolo11s-seg_10_uint8_a733.nb` — модель.
 - `yolo11_seg/model/dog.jpg` — тестовое изображение.
 
-**🚧 Что дальше:**
-- [ ] `npu_seg_server` — C++ сервер с UNIX-сокетом (по аналогии с `npu_server`).
-- [ ] Python-клиент `npu_seg_client.py`.
-- [ ] Интеграция с `cv_ctrl.py` — кнопка SEG в веб-интерфейсе.
+## 🎛️ NPU-сервисы (4 одновременно)
+
+В проекте работают **4 NPU-сервера** через UNIX-сокеты. Все запускаются автоматически при старте системы.
+| Сервис | Модель | Сокет | Время |
+|---|---|---|---|
+| `npu-server.service` | YOLO26s (детекция) | `/tmp/npu11.sock` | ~35 мс |
+| `npu-pose-server.service` | YOLO11_pose (позы) | `/tmp/npu_pose.sock` | ~62 мс |
+| `npu-seg-server.service` | YOLO11_seg (маски) | `/tmp/npu_seg.sock` | ~45 мс |
+| `npu-depth-server.service` | YOLO26n_depth (глубина) | `/tmp/npu_depth.sock` | ~65 мс |
+**Python-клиенты (в корне репозитория):**
+- `npu_client.py` — YOLO26s.
+- `npu_pose_client.py` — YOLO11_pose.
+- `npu_seg_client.py` — YOLO11_seg.
+- `npu_depth_client.py` — YOLO26n_depth.
+
+**Особенности:**
+- Все 4 сервиса работают параллельно — NPU справляется.
+- Переключение между режимами в вебе — мгновенное ~ 0.2 сек (без subprocess).
+- Модели копируются в `/dev/shm` (RAM-диск) через `ExecStartPre`.
+
+## 🎛️ Кнопки CV в веб-интерфейсе
+
+| Кнопка | Режим | Что делает |
+|---|---|---|
+| **OBJECTS** | YOLO26s | Детекция объектов (bbox + класс + confidence) |
+| **DEPTH** | YOLO26n_depth | Карта глубины (16×16 сетка + красная подсветка близких пикселей) |
+| **SEG** | YOLO11_seg | Маски объектов (RLE-сжатие) |
+| **COLOR** | OpenCV | Трекинг цвета |
+| **HAND GS** | MediaPipe | Жесты (не работает без MediaPipe) |
+| **MP FACE** | MediaPipe | Лица (не работает без MediaPipe) |
+| **MP POSE** | YOLO11_pose | Скелет (17 keypoints, COCO) |
+| **None** (Simple Detection Type) | — | Отключить CV |
+
+**Расположение в интерфейсе:**
+- **Advance CV Funcs** — OBJECTS, COLOR, HAND GS (3 кнопки).
+- **NPU Depth/Seg** — DEPTH, SEG (2 кнопки).
+- **MediaPipe Funcs** — MP FACE, MP POSE.
+
+**Подсветка активной кнопки:** автоматически через Socket.IO (событие `update`).
+
+
 
   
 ## 🚧 Что осталось

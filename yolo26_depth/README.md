@@ -1,282 +1,145 @@
-# 概述
+# YOLO26n-depth на NPU A733 (Orange Pi 4 Pro)
 
-本文简要介绍yolo26-depth模型的部署流程。
+Готовая сборка YOLO26-depth для Allwinner A733 с NPU depth-сервером через UNIX-сокет.
 
-## 模型来源
+Монокулярная оценка глубины по одному RGB-кадру. Выход — карта глубины 768×768 (метры). Дополняет лидар D500: depth даёт объём, лидар — точные расстояния в срезе.
 
-Ultralytics YOLO26 可通过官方 Ultralytics YOLO 包使用，支持目标检测、实例分割、语义分割、深度估计、图像分类、姿态估计、旋转目标检测和跟踪，并提供快速、准确、易用的 Python 与 CLI 工作流。
+## Что в папке
 
-开源项目地址：
+- `yolo26n-depth_pcq_a733.nb` — модель YOLO26n-depth (PCQ, 10.4 МБ) — **основная**.
+- `yolo26n-depth_int16_a733.nb` — модель nano-int16 (9.7 МБ) — запас.
+- `yolo26s-depth_int16_a733.nb` — модель small-int16 (21.3 МБ) — точная, но медленная.
+- `npu_depth_server` — собранный C++ depth-сервер (UNIX-сокет).
+- `npu_depth_server.cpp` — исходник сервера.
+- `yolo26_depth_post.cpp` — постобработка (heatmap + JET colormap).
+- `yolo26_depth_pre.cpp` — препроцессинг (letterbox 768×768).
+- `model_config.h` — конфиг (INPUT=768, OUTPUT=768).
+- `CMakeLists.txt.patched` — пропатченный CMakeLists (нативная сборка).
+- `build_native.sh` — скрипт нативной сборки.
+- `model/rgb_00285.jpg` — тестовое изображение (NYU Depth V2).
 
-```
-https://github.com/ultralytics/ultralytics
-```
+## Ключевые характеристики
 
+- **Вход:** 768×768 RGB (mean=0, scale=1/255).
+- **Выход:** 768×768 float32 (метры).
+- **Квантизация:** PCQ (INT8) для nano, int16 для s.
+- **Run time:** 65 мс (n-PCQ), 158 мс (n-int16), 244 мс (s-int16).
+- **FPS:** ~15 (n-PCQ), ~6 (n-int16), ~4 (s-int16).
 
+## Сравнение вариантов
 
-# yolo26-depth
+| Модель | Квантизация | Размер .nb | Run time | FPS | Качество |
+|---|---|---|---|---|---|
+| **n-depth** | **PCQ** | **10.4 МБ** | **65 мс** | **~15** | приемлемое |
+| n-depth | int16 | 9.7 МБ | 158 мс | ~6 | приемлемое |
+| s-depth | int16 | 21.3 МБ | 244 мс | ~4 | высокое |
+| s-depth | PCQ | — | — | — | шумное |
 
-下载github上的Ultralytics源码， 调用源码的DepthPredictor进行推理，推理效果如下：
+**Ключевой вывод:** nano + PCQ — лучший баланс (65 мс, ~15 FPS, приемлемое качество).
 
-![result_pt](figures/result_pt.jpg)
+## Почему PCQ для nano работает, а для s — нет
 
-## 导出onnx模型
+YOLO26-depth имеет `Exp()` на выходе — малейшая ошибка в log-глубине экспоненциально усиливается при INT8-квантизации.
 
-ultralytics提供了模型导出器，位置于ultralytics/engine/exporter.py
+- **s-модель** (больше параметров) накапливает больше ошибок → PCQ шумит.
+- **n-модель** (меньше параметров) — квантуется лучше → PCQ даёт приемлемое качество.
 
-执行export_onnx.py，导出yolo26s-depth.onnx
-
-```python
-import argparse
-import sys
-from pathlib import Path
-
-# 使用项目源码
-_LOCAL_ULTralYTICS = Path(__file__).resolve().parent / "ultralytics"
-if str(_LOCAL_ULTralYTICS) not in sys.path:
-    sys.path.insert(0, str(_LOCAL_ULTralYTICS))
-
-from ultralytics import YOLO
-def main():
-    parser = argparse.ArgumentParser(description="导出 YOLO26-depth 为 ONNX")
-    parser.add_argument("--model", type=str, default="yolo26s-depth.pt",
-                        help="模型权重路径 (.pt)")
-    parser.add_argument("--imgsz", type=int, default=768,
-                        help="输入尺寸 (与训练一致, 默认 768)")
-    parser.add_argument("--opset", type=int, default=14,
-                        help="ONNX opset 版本 ")
-    parser.add_argument("--simplify", action="store_true",
-                        help="使用 onnxslim 简化模型")
-
-    args = parser.parse_args()
-
-    model = YOLO(args.model)
-    print(f"[INFO] task: {model.task}")
-
-    export_kwargs = dict(
-        format="onnx",
-        imgsz=args.imgsz,
-        opset=args.opset,
-        simplify=args.simplify,
-        dynamic=args.dynamic,
-    )
-    path = model.export(**export_kwargs)
-    print(f"[OK] ONNX 导出完成: {path}")
-
-
-if __name__ == "__main__":
-    main()
-```
-
-
-
-## onnx模型简化
-
-使用onnxsim工具检测并裁剪yolo26s-depth.onnx模型的多余计算节点。
+## Быстрый тест (демо)
 
 ```bash
-python3 -m onnxsim yolo26s-depth.onnx yolo26s-depth.onnx
+cd /root/ugv_rpi/yolo26_depth/
+
+LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733 \
+./yolo26_depth_demo \
+  -nb model/yolo26n-depth_pcq_a733.nb \
+  -i model/rgb_00285.jpg \
+  -l 1 -m 10
 ```
 
-打印输出如下，裁剪了两个多余算子。
+Результат сохраняется в `output_depth_heatmap.jpg`.
+
+## Сервер (UNIX-сокет)
 
 ```bash
-┏━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┓
-┃               ┃ Original Model ┃ Simplified Model ┃
-┡━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━┩
-│ Add           │ 22             │ 22               │
-│ Clip          │ 1              │ 1                │
-│ Concat        │ 19             │ 19               │
-│ Constant      │ 192            │ 191              │
-│ Conv          │ 88             │ 88               │
-│ ConvTranspose │ 1              │ 1                │
-│ Exp           │ 1              │ 1                │
-│ MatMul        │ 4              │ 4                │
-│ MaxPool       │ 3              │ 3                │
-│ Mul           │ 81             │ 81               │
-│ Pow           │ 1              │ 0                │
-│ Reshape       │ 6              │ 6                │
-│ Resize        │ 5              │ 5                │
-│ Sigmoid       │ 78             │ 78               │
-│ Softmax       │ 2              │ 2                │
-│ Split         │ 11             │ 11               │
-│ Transpose     │ 4              │ 4                │
-│ Model Size    │ 46.0MiB        │ 46.0MiB          │
-└───────────────┴────────────────┴──────────────────┘
+cd /root/ugv_rpi/yolo26_depth/
+
+LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733 \
+./npu_depth_server /dev/shm/yolo26n-depth_pcq_a733.nb
 ```
 
-用Netron软件查看ONNX模型结构如下：
+Сервер загрузит модель, создаст сокет `/tmp/npu_depth.sock` и будет ждать JPEG-кадры.
 
-![Netron](figures/Netron.png)
+## Python-клиент
 
+`npu_depth_client.py` (в корне репозитория):
 
+- Подключается к `/tmp/npu_depth.sock`.
+- `detect(frame)` возвращает dict с:
+  - `grid` (16×16 значений глубины в метрах),
+  - `near_rle` (RLE-маска пикселей ближе порога),
+  - `near_threshold`, `near_mask_size`, `grid_size`.
 
-# 参考的onnx浮点模型下载地址
+## Как собрать заново
 
 ```bash
-http://netstorage.allwinnertech.com:5000/sharing/jV6YQDAv2
+cd /root/ugv_rpi/yolo26_depth/
+./build_native.sh
 ```
 
+## Ключевые фиксы для нативной сборки
 
+1. `SYS_ARCH=linux_aarch64` — принудительно.
+2. OpenCV через `pkg-config` — не `find_package`.
+3. Убрать `_GLIBCXX_USE_CXX11_ABI=0`.
+4. `MODEL_ZOO_HOME_DIR` — абсолютный путь.
+5. Собирать только `yolo26_depth_demo` и `npu_depth_server`.
 
-# 数据集来源
+## Протокол
 
-yolo26-depth深度估计模型使用的NYU Depth V2数据集来进行的训练和评估，这是一个室内场景深度数据集，覆盖复杂室内环境（办公室、家庭等），数据集链接：https://cs.nyu.edu/~fergus/datasets/nyu_depth_v2.html，选取10张训练集图片作为量化数据集，存放在../../dataset/NYU_Depth_V2文件夹中。
-
-
-
-# 模型转换
-
-模型转换主要包含原始模型导入、量化、导出为NPU可识别的模型格式等步骤。
-
-## yolo26_depth
-
-```bash
-cd ./convert_model/
+```
+Клиент -> Сервер: [4 байта BE: длина JPEG] [JPEG bytes]
+Сервер -> Клиент: [4 байта BE: длина JSON] [JSON bytes]
 ```
 
-修改config_yml.py文件的相关参数配置；
-
-yolo26-depth模型是在[0, 1]范围的RGB值上训练的，没有做 mean/std 标准化
-
-$$
-x_{\text{out}} = \frac{x/255 - \text{mean}}{\text{std}}
-$$
-
-因此，数据的标准化操作为：mean=[0, 0, 0] x 255，scale=[1,1,1] / 255 = [0.0039216, 0.0039216, 0.0039216]
-
-```python
-# "database"
-DATASET = ['../../dataset/NYU_Depth_V2/dataset.txt']
-DATASET_TYPE = ["TEXT"]
-
-# mean, scale	##根据模型训练中的图像预处理参数
-MEAN = [0, 0, 0]
-SCALE = [0.00392, 0.00392, 0.00392]
-
-# reverse_channel: True bgr, False rgb
-REVERSE_CHANNEL = False
-
-# add_preproc_node, True or False
-ADD_PREPROC_NODE = True
-# "preproc_type"
-PREPROC_TYPE = ["IMAGE_RGB"]
-
-# add_postproc_node, quant output -> float32 output
-ADD_POSTPROC_NODE = True
+**JSON:**
+```json
+{
+  "grid_size": [16, 16],
+  "grid": [1.92, 4.51, ...256 значений в метрах],
+  "near_threshold": 2.0,
+  "near_mask_size": [640, 480],
+  "near_rle": [[1, 120], [1, 80], ...]
+}
 ```
 
-模型导入、量化、导出等步骤：
+## Автозапуск
 
-```bash
-# using xxx_env.sh to create softlink
-./convert_model_env.sh
+Сервис `npu-depth-server.service`:
 
-# 导入
-# pegasus_import.sh <model_name>
-./pegasus_import.sh yolo26s-depth
+- Загружает модель один раз при старте.
+- Слушает `/tmp/npu_depth.sock`.
+- Автоматически перезапускается при падении.
+- Сокет отдельный от других NPU-серверов — можно запускать все 4 одновременно.
 
-# 量化
-# pegasus_quantize.sh <model_name> <quantize_type> <calibration_set_size>
-./pegasus_quantize.sh yolo26s-depth int16 10
+## Интеграция с роботом
 
-# 仿真（可选）
-# pegasus_inference.sh <model_name> <quantize_type>
-./pegasus_inference.sh yolo26s-depth int16
+- Кнопка **DEPTH** в веб-интерфейсе → запуск depth-воркера.
+- Переключение с другими режимами — мгновенное (без subprocess).
+- Отрисовка: heatmap (16×16 сетка) + красная подсветка близких пикселей.
+- CPU — средняя нагрузка.
+- FPS — ~15.
 
-# 导出nb模型
-# pegasus_export_ovx_nbg.sh <model_name> <quantize_type> <platform>
-./pegasus_export_ovx_nbg.sh yolo26s-depth int16 t736
+## Конвертация модели
 
-# 导出的模型文件存放在../model目录
-# 例如 ../model/yolo26s-depth_int16_t736.nb
-```
+**Источник:** Model Zoo v1.1.0 от Allwinner (`examples/yolo26_depth/`).
 
+**Пайплайн:**
 
+1. Ultralytics: `yolo26n-depth.pt` → ONNX (opset 14, imgsz 768, simplify).
+2. Docker `ubuntu-npu:v2.0.10.2`:
+   - `./pegasus_import.sh yolo26n-depth`
+   - `./pegasus_quantize.sh yolo26n-depth pcq 10`
+   - `./pegasus_export_ovx_nbg.sh yolo26n-depth pcq a733`
+3. **Результат:** `yolo26n-depth_pcq_a733.nb` (10.4 МБ).
 
-# 板端demo
-
-含demo编译及运行说明
-
-## 解压opencv压缩包
-
-```bash
-# 进入目录
-cd ../../../3rdparty/opencv/
-# 解压，选择对应平台
-# armhf, eg: V85x, R853
-unzip opencv-3.4.16-gnueabihf-linux.zip
-# linux aarch64, eg: T527/MR527/MR536/T536/A733/T736
-unzip opencv-4.9.0-aarch64-linux-sunxi-glibc.zip
-# android aarch64, eg: T527/A733/T736
-unzip opencv-4.9.0-android.zip
-```
-
-## 准备交叉编译工具链
-
-### Linux
-
-```bash
-# 进入目录
-cd ../../0-toolchains/
-# 解压
-# armhf, V85x, R853
-unzip arm-openwrt-linux-muslgnueabi.zip
-chmod 777 -R ./arm-openwrt-linux-muslgnueabi
-# aarch64, MR527, T527, MR536, T536, A733, T736
-tar xvf gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu.tar.xz
-# aarch64 for debian11, T527, A733, T736
-tar vxf gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu.tar.xz
-```
-
-编译脚本会根据平台自动选择交叉编译工具链，若需使用其它路径的工具链，可在`cmake_toolchain`目录修改`.cmake`文件内容指定对应的交叉编译工具链路径。
-
-## build && run
-
-### Linux
-
-在Linux系统下测试。编译用法如下：
-
-```bash
-# 途径一：在yolo26_depth目录编译
-cd ../examples/yolo26_depth/
-./../build_linux.sh -t <platform> [-s <system>]
-# 途径二：在examples目录，再选择yolo26_depth目录编译
-cd ../examples
-./build_linux.sh -t <platform> -p yolo26_depth [-s <system>]
-```
-
-以下说明以T736平台为例，编译的文件在mediapipe/install/yolo26_depth_demo_linux_t736
-
-```bash
-cd ../examples
-./build_linux.sh -t t736 -p yolo26_depth
-```
-
-push 可执行文件、模型文件、输入图片到板端目录；
-
-```bash
-adb push install/yolo26_depth_demo_linux_t736 /mnt/UDISK/
-```
-
-运行
-
-```bash
-adb shell
-cd /mnt/UDISK/yolo26_depth_demo_linux_t736
-
-# 可选
-export LD_LIBRARY_PATH=./lib
-
-# 运行可执行文件
-# ./yollo26_depth_demo_t736 -h 查看执行示例说明
-chmod +x ./yolo26_depth_demo_t736
-
-./yolo26_depth_demo_t736  -nb model/yolo26s-depth_int16_t736.nb -i model/rgb_00285.jpg
-```
-
-运行后，检测结果保存为图片output_depth_heatmap.jpg。
-
-int16量化推理结果如下：
-
-![result_nb_int16](figures/result_nb_int16.jpg)
+**Важно:** `config_yml.py` — mean=[0,0,0], scale=[1/255,1/255,1/255], IMAGE_RGB. Для nano и s-версии — одинаковые параметры.

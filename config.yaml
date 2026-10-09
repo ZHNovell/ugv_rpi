@@ -36,6 +36,7 @@ code:
   base_on: 10408
   cv_auto: 10307
   cv_clor: 10305
+  cv_depth: 10310
   cv_face: 10303
   cv_moti: 10302
   cv_none: 10301
@@ -53,6 +54,7 @@ code:
   mp_face: 10308
   mp_hand: 10306
   mp_pose: 10309
+  cv_seg: 10311
   pic_cap: 10201
   re_capt: 10402
   re_none: 10401

@@ -7,6 +7,7 @@ var pic_cap, vid_sta, vid_end, cam_toggle;
 var mc_lock, mc_unlo;
 var cv_none, cv_moti, cv_face, cv_objs, cv_clor, mp_hand, cv_auto;
 var mp_face, mp_pose;
+var cv_depth, cv_seg;
 var re_none, re_capt, re_reco, led_off, led_aut, led_ton, base_of, base_on;
 var head_ct, base_ct;
 var s_panid, release, set_mid, s_tilid;
@@ -69,6 +70,8 @@ fetch('/config')
       cv_auto = yamlObject.code.cv_auto;
       mp_face = yamlObject.code.mp_face;
       mp_pose = yamlObject.code.mp_pose;
+      cv_depth = yamlObject.code.cv_depth;
+      cv_seg = yamlObject.code.cv_seg;
 
       re_none = yamlObject.code.re_none;
       re_capt = yamlObject.code.re_capt;
@@ -622,16 +625,20 @@ socket.on('update', function(data) {
         var FButtons = advFBtn.getElementsByTagName("button");
         removeButtonsClass(FButtons);
 
-        // Обработчики для Advance CV Funcs
-        FButtons[0].addEventListener('click', function() {
-            sendCommand('base -c {"T":' + cv_objs + '}');
-        });
-        FButtons[1].addEventListener('click', function() {
-            sendCommand('base -c {"T":' + cv_clor + '}');
-        });
-        FButtons[2].addEventListener('click', function() {
-            sendCommand('base -c {"T":' + mp_hand + '}');
-        });
+        // Обработчики для Advance CV Funcs (3 кнопки: OBJECTS, COLOR, HAND GS)
+        // ВАЖНО: onclick (idempotent), не addEventListener.
+        FButtons[0].onclick = function() { sendCommand('base -c {"T":' + cv_objs + '}'); };
+        FButtons[1].onclick = function() { sendCommand('base -c {"T":' + cv_clor + '}'); };
+        FButtons[2].onclick = function() { sendCommand('base -c {"T":' + mp_hand + '}'); };
+
+        // Обработчики для NPU Depth/Seg (2 кнопки)
+        var npuDSBtn = document.getElementById("npu_depth_seg_btn");
+        if (npuDSBtn) {
+            var DSButtons = npuDSBtn.getElementsByTagName("button");
+            removeButtonsClass(DSButtons);   // ← сбрасываем активность
+            DSButtons[0].onclick = function() { sendCommand('base -c {"T":' + cv_depth + '}'); };
+            DSButtons[1].onclick = function() { sendCommand('base -c {"T":' + cv_seg + '}'); };
+        }
 
         var mpBtn = document.getElementById("mp_funcs_btn");
         var MPButtons = mpBtn.getElementsByTagName("button");
@@ -670,6 +677,16 @@ socket.on('update', function(data) {
             FButtons[1].classList.add("ctl_btn_active");
         } else if (data[detect_type] == mp_hand) {
             FButtons[2].classList.add("ctl_btn_active");
+        } else if (data[detect_type] == cv_depth) {
+            if (npuDSBtn) {
+                var DSButtons = npuDSBtn.getElementsByTagName("button");
+                DSButtons[0].classList.add("ctl_btn_active");
+            }
+        } else if (data[detect_type] == cv_seg) {
+            if (npuDSBtn) {
+                var DSButtons = npuDSBtn.getElementsByTagName("button");
+                DSButtons[1].classList.add("ctl_btn_active");
+            }
         } else if (data[detect_type] == mp_face) {
             MPButtons[0].classList.add("ctl_btn_active");
         } else if (data[detect_type] == mp_pose) {
@@ -774,6 +791,14 @@ function cmdSend(inputA, inputB, inputC){
 
 function sendCmdObjs() {
     sendCommand('base -c {"T":' + cv_objs + '}');
+}
+
+function sendCmdDepth() {
+    sendCommand('base -c {"T":' + cv_depth + '}');
+}
+
+function sendCmdSeg() {
+    sendCommand('base -c {"T":' + cv_seg + '}');
 }
 
 function sendCmdClor() {

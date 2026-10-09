@@ -61,6 +61,18 @@ class OpencvFuncs():
         self.npu_pose_stop_flag = False
         self.npu_pose_latest_frame = None
         self.npu_pose_frame_lock = threading.Lock()
+
+        # NPU seg worker
+        self.npu_seg_thread = None
+        self.npu_seg_stop_flag = False
+        self.npu_seg_latest_frame = None
+        self.npu_seg_frame_lock = threading.Lock()
+
+        # NPU depth worker
+        self.npu_depth_thread = None
+        self.npu_depth_stop_flag = False
+        self.npu_depth_latest_frame = None
+        self.npu_depth_frame_lock = threading.Lock()
         self.cv_mode = f['code'][f'cv_none']
         self.detection_reaction_mode = f['code']['re_none']
         
@@ -124,6 +136,10 @@ class OpencvFuncs():
         self.npu_client = NPUClient()
         from npu_pose_client import NPUPoseClient
         self.npu_pose_client = NPUPoseClient()
+        from npu_seg_client import NPUSegClient
+        self.npu_seg_client = NPUSegClient()
+        from npu_depth_client import NPUDepthClient
+        self.npu_depth_client = NPUDepthClient()
         self.npu_temp_path = "/tmp/yolo_input.jpg"
 
         # mediapipe (only if available)
@@ -296,6 +312,14 @@ class OpencvFuncs():
                     # mp_pose: YOLO11_pose работает в асинхронном потоке.
                     with self.npu_pose_frame_lock:
                         self.npu_pose_latest_frame = input_frame.copy()
+                elif self.cv_mode == f['code']['cv_seg']:
+                    # cv_seg: YOLO11_seg работает в асинхронном потоке.
+                    with self.npu_seg_frame_lock:
+                        self.npu_seg_latest_frame = input_frame.copy()
+                elif self.cv_mode == f['code']['cv_depth']:
+                    # cv_depth: YOLO26n_depth работает в асинхронном потоке.
+                    with self.npu_depth_frame_lock:
+                        self.npu_depth_latest_frame = input_frame.copy()
                 else:
                     # Остальные CV-режимы — как раньше (в отдельном потоке)
                     self.cv_frame_counter += 1
@@ -665,6 +689,18 @@ class OpencvFuncs():
         elif prev_mode == f['code']['mp_pose']:
             self._stop_npu_pose_worker()
 
+        # Управление NPU seg-потоком (YOLO11_seg)
+        if self.cv_mode == f['code']['cv_seg']:
+            self._start_npu_seg_worker()
+        elif prev_mode == f['code']['cv_seg']:
+            self._stop_npu_seg_worker()
+
+        # Управление NPU depth-потоком (YOLO26n_depth)
+        if self.cv_mode == f['code']['cv_depth']:
+            self._start_npu_depth_worker()
+        elif prev_mode == f['code']['cv_depth']:
+            self._stop_npu_depth_worker()
+
     def set_detection_reaction(self, input_reaction):
         self.detection_reaction_mode = input_reaction
         if self.detection_reaction_mode == f['code']['re_none']:
@@ -859,6 +895,14 @@ class OpencvFuncs():
                 self.overlay = overlay_buffer
             except Exception as e:
                 print(f"[cv_ctrl._npu_worker] error: {e}", flush=True)
+
+    def cv_detect_seg(self, img):
+        """Legacy-заглушка. Реально seg обрабатывается в _npu_seg_worker."""
+        pass
+
+    def cv_detect_depth(self, img):
+        """Legacy-заглушка. Реально depth обрабатывается в _npu_depth_worker."""
+        pass
 
     def cv_detect_objects(self, img):
         """Legacy-функция. Реально cv_objs обрабатывается в _npu_worker через сокет."""
@@ -1285,6 +1329,191 @@ class OpencvFuncs():
             except Exception as e:
                 print(f"[cv_ctrl._npu_pose_worker] error: {e}", flush=True)
 
+    # ============ NPU SEG (YOLO11_seg) ============
+    def _start_npu_seg_worker(self):
+        """Запускает асинхронный NPU-поток (YOLO11_seg)."""
+        if self.npu_seg_thread is not None and self.npu_seg_thread.is_alive():
+            return
+        self.npu_seg_stop_flag = False
+        self.npu_seg_thread = threading.Thread(target=self._npu_seg_worker, daemon=True)
+        self.npu_seg_thread.start()
+        print("[cv_ctrl] NPU seg worker started", flush=True)
+
+    def _stop_npu_seg_worker(self):
+        """Останавливает seg-поток."""
+        if self.npu_seg_thread is None:
+            return
+        self.npu_seg_stop_flag = True
+        self.npu_seg_thread.join(timeout=2.0)
+        self.npu_seg_thread = None
+        print("[cv_ctrl] NPU seg worker stopped", flush=True)
+
+    def _decode_rle_mask(self, rle, w, h):
+        """Восстанавливает бинарную маску из RLE-пар [[v,count],...]."""
+        import numpy as np
+        mask = np.zeros(w * h, dtype=np.uint8)
+        pos = 0
+        for v, count in rle:
+            if v == 1:
+                mask[pos:pos+count] = 255
+            pos += count
+        return mask.reshape((h, w))
+
+    def _npu_seg_worker(self):
+        """Бесконечный цикл: берёт последний кадр, запускает seg-инференс, рисует маски."""
+        import numpy as np
+        while not self.npu_seg_stop_flag:
+            if self.cv_mode != f['code']['cv_seg']:
+                time.sleep(0.1)
+                continue
+
+            with self.npu_seg_frame_lock:
+                frame = self.npu_seg_latest_frame
+                self.npu_seg_latest_frame = None
+
+            if frame is None:
+                time.sleep(0.01)
+                continue
+
+            try:
+                overlay_buffer = np.zeros_like(frame)
+                cv2.putText(overlay_buffer, 'NPU YOLO11_seg', (50, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+                detections = self.npu_seg_client.detect(frame)
+
+                # Палитра цветов (по индексу класса)
+                palette = [
+                    (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0),
+                    (255, 0, 255), (0, 255, 255), (128, 255, 0), (255, 128, 0),
+                    (0, 128, 255), (128, 0, 255)
+                ]
+
+                for det in detections:
+                    x0, y0, x1, y1 = det['bbox']
+                    x0, y0, x1, y1 = int(x0), int(y0), int(x1), int(y1)
+                    color = palette[det['class_id'] % len(palette)]
+
+                    # Рисуем bbox
+                    cv2.rectangle(overlay_buffer, (x0, y0), (x1, y1), color, 2)
+
+                    # Подпись
+                    label = f"{det['class']}: {det['confidence']*100:.0f}%"
+                    y = y0 - 10 if y0 - 10 > 10 else y0 + 20
+                    cv2.putText(overlay_buffer, label, (x0, y),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+                    # Восстанавливаем маску из RLE
+                    mask_size = det.get('mask_size', [0, 0])
+                    mask_rle = det.get('mask_rle', [])
+                    mw, mh = int(mask_size[0]), int(mask_size[1])
+                    if mw > 0 and mh > 0 and mask_rle:
+                        mask = self._decode_rle_mask(mask_rle, mw, mh)
+                        # Накладываем маску на bbox-область
+                        roi = overlay_buffer[y0:y0+mh, x0:x0+mw]
+                        if roi.shape[:2] == mask.shape[:2]:
+                            roi[mask > 0] = color
+
+                self.overlay = overlay_buffer
+            except Exception as e:
+                print(f"[cv_ctrl._npu_seg_worker] error: {e}", flush=True)
+
+    # ============ NPU DEPTH (YOLO26n_depth) ============
+    def _start_npu_depth_worker(self):
+        """Запускает асинхронный NPU-поток (YOLO26n_depth)."""
+        if self.npu_depth_thread is not None and self.npu_depth_thread.is_alive():
+            return
+        self.npu_depth_stop_flag = False
+        self.npu_depth_thread = threading.Thread(target=self._npu_depth_worker, daemon=True)
+        self.npu_depth_thread.start()
+        print("[cv_ctrl] NPU depth worker started", flush=True)
+
+    def _stop_npu_depth_worker(self):
+        """Останавливает depth-поток."""
+        if self.npu_depth_thread is None:
+            return
+        self.npu_depth_stop_flag = True
+        self.npu_depth_thread.join(timeout=2.0)
+        self.npu_depth_thread = None
+        print("[cv_ctrl] NPU depth worker stopped", flush=True)
+
+    def _npu_depth_worker(self):
+        """Бесконечный цикл: берёт последний кадр, запускает depth-инференс, рисует heatmap."""
+        import numpy as np
+        while not self.npu_depth_stop_flag:
+            if self.cv_mode != f['code']['cv_depth']:
+                time.sleep(0.1)
+                continue
+
+            with self.npu_depth_frame_lock:
+                frame = self.npu_depth_latest_frame
+                self.npu_depth_latest_frame = None
+
+            if frame is None:
+                time.sleep(0.01)
+                continue
+
+            try:
+                overlay_buffer = np.zeros_like(frame)
+                cv2.putText(overlay_buffer, 'NPU YOLO26_depth', (50, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+                result = self.npu_depth_client.detect(frame)
+                if not result:
+                    self.overlay = overlay_buffer
+                    continue
+
+                # 1. Рисуем сетку глубины (16x16) как цветные квадраты
+                grid = result.get('grid', [])
+                gw, gh = result.get('grid_size', [16, 16])
+                if grid and len(grid) == gw * gh:
+                    h, w = frame.shape[:2]
+                    cw, ch = w // gw, h // gh
+
+                    # Нормализация для цвета (близко=красный, далеко=синий)
+                    d_min, d_max = min(grid), max(grid)
+                    if d_max - d_min < 0.1:
+                        d_max = d_min + 1.0
+
+                    for gy in range(gh):
+                        for gx in range(gw):
+                            d = grid[gy * gw + gx]
+                            # 0 = близко (красный), 1 = далеко (синий)
+                            t = (d - d_min) / (d_max - d_min)
+                            t = max(0.0, min(1.0, t))
+                            # BGR: t=0 → красный (0,0,255), t=1 → синий (255,0,0)
+                            color = (int(255 * t), 0, int(255 * (1 - t)))
+                            cv2.rectangle(overlay_buffer,
+                                          (gx * cw, gy * ch),
+                                          ((gx + 1) * cw, (gy + 1) * ch),
+                                          color, -1)
+
+                    # Делаем полупрозрачным (50%)
+                    overlay_buffer = cv2.addWeighted(overlay_buffer, 0.5, np.zeros_like(overlay_buffer), 0.5, 0)
+
+                    # Средняя глубина в центре
+                    center_d = grid[(gh // 2) * gw + (gw // 2)]
+                    cv2.putText(overlay_buffer, f'Center: {center_d:.2f} m', (50, 100),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+                # 2. Отрисовка near-RLE (пиксели ближе порога)
+                near_rle = result.get('near_rle', [])
+                near_size = result.get('near_mask_size', [0, 0])
+                near_thr = result.get('near_threshold', 2.0)
+                mw, mh = int(near_size[0]), int(near_size[1])
+                if mw > 0 and mh > 0 and near_rle:
+                    h, w = frame.shape[:2]
+                    if mw == w and mh == h:
+                        near_mask = self._decode_rle_mask(near_rle, mw, mh)
+                        # Накладываем красным (только близкие пиксели)
+                        overlay_buffer[near_mask > 0] = (0, 0, 255)
+                        cv2.putText(overlay_buffer, f'Near < {near_thr} m', (50, 140),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+                self.overlay = overlay_buffer
+            except Exception as e:
+                print(f"[cv_ctrl._npu_depth_worker] error: {e}", flush=True)
+
     def mediaPipe_pose(self, img):
         if not MEDIAPIPE_AVAILABLE:
             return
@@ -1357,7 +1586,9 @@ class OpencvFuncs():
             f['code']['mp_hand']: self.mp_detect_hand,
             f['code']['cv_auto']: self.cv_auto_drive,
             f['code']['mp_face']: self.mediaPipe_faces,
-            f['code']['mp_pose']: self.mediaPipe_pose
+            f['code']['mp_pose']: self.mediaPipe_pose,
+            f['code']['cv_seg']: self.cv_detect_seg,
+            f['code']['cv_depth']: self.cv_detect_depth
         }
         try:
             cv_mode_list[self.cv_mode](frame)

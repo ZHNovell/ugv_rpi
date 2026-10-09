@@ -104,6 +104,7 @@ cmd_actions = {
     f['code']['mp_face']: lambda: cvf.set_cv_mode(f['code']['mp_face']),
     f['code']['mp_pose']: lambda: cvf.set_cv_mode(f['code']['mp_pose']),
     f['code']['cv_depth']: lambda: cvf.set_cv_mode(f['code']['cv_depth']),
+    f['code']['cv_aruco']: lambda: cvf.set_cv_mode(f['code']['cv_aruco']),
     f['code']['cv_seg']: lambda: cvf.set_cv_mode(f['code']['cv_seg']),
 
     f['code']['re_none']: lambda: cvf.set_detection_reaction(f['code']['re_none']),

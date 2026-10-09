@@ -36,6 +36,7 @@ code:
   base_on: 10408
   cv_auto: 10307
   cv_clor: 10305
+  cv_aruco: 10312
   cv_depth: 10310
   cv_face: 10303
   cv_moti: 10302

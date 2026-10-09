@@ -7,7 +7,7 @@ var pic_cap, vid_sta, vid_end, cam_toggle;
 var mc_lock, mc_unlo;
 var cv_none, cv_moti, cv_face, cv_objs, cv_clor, mp_hand, cv_auto;
 var mp_face, mp_pose;
-var cv_depth, cv_seg;
+var cv_depth, cv_seg, cv_aruco;
 var re_none, re_capt, re_reco, led_off, led_aut, led_ton, base_of, base_on;
 var head_ct, base_ct;
 var s_panid, release, set_mid, s_tilid;
@@ -72,6 +72,7 @@ fetch('/config')
       mp_pose = yamlObject.code.mp_pose;
       cv_depth = yamlObject.code.cv_depth;
       cv_seg = yamlObject.code.cv_seg;
+      cv_aruco = yamlObject.code.cv_aruco;
 
       re_none = yamlObject.code.re_none;
       re_capt = yamlObject.code.re_capt;
@@ -638,6 +639,7 @@ socket.on('update', function(data) {
             removeButtonsClass(DSButtons);   // ← сбрасываем активность
             DSButtons[0].onclick = function() { sendCommand('base -c {"T":' + cv_depth + '}'); };
             DSButtons[1].onclick = function() { sendCommand('base -c {"T":' + cv_seg + '}'); };
+            if (DSButtons[2]) DSButtons[2].onclick = function() { sendCommand('base -c {"T":' + cv_aruco + '}'); };
         }
 
         var mpBtn = document.getElementById("mp_funcs_btn");
@@ -686,6 +688,11 @@ socket.on('update', function(data) {
             if (npuDSBtn) {
                 var DSButtons = npuDSBtn.getElementsByTagName("button");
                 DSButtons[1].classList.add("ctl_btn_active");
+            }
+        } else if (data[detect_type] == cv_aruco) {
+            if (npuDSBtn) {
+                var DSButtons = npuDSBtn.getElementsByTagName("button");
+                if (DSButtons[2]) DSButtons[2].classList.add("ctl_btn_active");
             }
         } else if (data[detect_type] == mp_face) {
             MPButtons[0].classList.add("ctl_btn_active");
@@ -799,6 +806,10 @@ function sendCmdDepth() {
 
 function sendCmdSeg() {
     sendCommand('base -c {"T":' + cv_seg + '}');
+}
+
+function sendCmdAruco() {
+    sendCommand('base -c {"T":' + cv_aruco + '}');
 }
 
 function sendCmdClor() {

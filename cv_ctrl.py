@@ -73,6 +73,13 @@ class OpencvFuncs():
         self.npu_depth_stop_flag = False
         self.npu_depth_latest_frame = None
         self.npu_depth_frame_lock = threading.Lock()
+
+        # ArUco worker (OpenCV CPU)
+        self.aruco_thread = None
+        self.aruco_stop_flag = False
+        self.aruco_latest_frame = None
+        self.aruco_frame_lock = threading.Lock()
+        self.aruco_last_detections = []
         self.cv_mode = f['code'][f'cv_none']
         self.detection_reaction_mode = f['code']['re_none']
         
@@ -140,6 +147,8 @@ class OpencvFuncs():
         self.npu_seg_client = NPUSegClient()
         from npu_depth_client import NPUDepthClient
         self.npu_depth_client = NPUDepthClient()
+        from aruco_client import ArucoClient
+        self.aruco_client = ArucoClient()
         self.npu_temp_path = "/tmp/yolo_input.jpg"
 
         # mediapipe (only if available)
@@ -320,6 +329,10 @@ class OpencvFuncs():
                     # cv_depth: YOLO26n_depth работает в асинхронном потоке.
                     with self.npu_depth_frame_lock:
                         self.npu_depth_latest_frame = input_frame.copy()
+                elif self.cv_mode == f['code']['cv_aruco']:
+                    # cv_aruco: ArUco работает в асинхронном потоке (CPU).
+                    with self.aruco_frame_lock:
+                        self.aruco_latest_frame = input_frame.copy()
                 else:
                     # Остальные CV-режимы — как раньше (в отдельном потоке)
                     self.cv_frame_counter += 1
@@ -701,6 +714,12 @@ class OpencvFuncs():
         elif prev_mode == f['code']['cv_depth']:
             self._stop_npu_depth_worker()
 
+        # Управление ArUco-потоком (OpenCV CPU)
+        if self.cv_mode == f['code']['cv_aruco']:
+            self._start_aruco_worker()
+        elif prev_mode == f['code']['cv_aruco']:
+            self._stop_aruco_worker()
+
     def set_detection_reaction(self, input_reaction):
         self.detection_reaction_mode = input_reaction
         if self.detection_reaction_mode == f['code']['re_none']:
@@ -895,6 +914,10 @@ class OpencvFuncs():
                 self.overlay = overlay_buffer
             except Exception as e:
                 print(f"[cv_ctrl._npu_worker] error: {e}", flush=True)
+
+    def cv_detect_aruco(self, img):
+        """Legacy-заглушка. Реально ArUco обрабатывается в _aruco_worker."""
+        pass
 
     def cv_detect_seg(self, img):
         """Legacy-заглушка. Реально seg обрабатывается в _npu_seg_worker."""
@@ -1514,6 +1537,65 @@ class OpencvFuncs():
             except Exception as e:
                 print(f"[cv_ctrl._npu_depth_worker] error: {e}", flush=True)
 
+    # ============ ArUco (OpenCV CPU) ============
+    def _start_aruco_worker(self):
+        """Запускает асинхронный ArUco-поток."""
+        if self.aruco_thread is not None and self.aruco_thread.is_alive():
+            return
+        self.aruco_stop_flag = False
+        self.aruco_thread = threading.Thread(target=self._aruco_worker, daemon=True)
+        self.aruco_thread.start()
+        print("[cv_ctrl] ArUco worker started", flush=True)
+
+    def _stop_aruco_worker(self):
+        """Останавливает ArUco-поток."""
+        if self.aruco_thread is None:
+            return
+        self.aruco_stop_flag = True
+        self.aruco_thread.join(timeout=2.0)
+        self.aruco_thread = None
+        print("[cv_ctrl] ArUco worker stopped", flush=True)
+
+    def _aruco_worker(self):
+        """Бесконечный цикл: берёт последний кадр, детектирует ArUco, рисует."""
+        import numpy as np
+        while not self.aruco_stop_flag:
+            if self.cv_mode != f['code']['cv_aruco']:
+                time.sleep(0.1)
+                continue
+
+            with self.aruco_frame_lock:
+                frame = self.aruco_latest_frame
+                self.aruco_latest_frame = None
+
+            if frame is None:
+                time.sleep(0.01)
+                continue
+
+            try:
+                overlay_buffer = np.zeros_like(frame)
+                cv2.putText(overlay_buffer, 'ArUco', (50, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+                detections = self.aruco_client.detect(frame)
+                self.aruco_last_detections = detections
+
+                if detections:
+                    # Рисуем детекции прямо в overlay
+                    self.aruco_client.draw(overlay_buffer, detections)
+
+                    # Выводим данные в верхнем левом углу
+                    y_offset = 100
+                    for det in detections:
+                        text = f"ID={det['id']} X={det['x']:+.2f} Y={det['y']:+.2f} Z={det['z']:+.2f} d={det['dist']:.2f}m"
+                        cv2.putText(overlay_buffer, text, (50, y_offset),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                        y_offset += 30
+
+                self.overlay = overlay_buffer
+            except Exception as e:
+                print(f"[cv_ctrl._aruco_worker] error: {e}", flush=True)
+
     def mediaPipe_pose(self, img):
         if not MEDIAPIPE_AVAILABLE:
             return
@@ -1588,7 +1670,8 @@ class OpencvFuncs():
             f['code']['mp_face']: self.mediaPipe_faces,
             f['code']['mp_pose']: self.mediaPipe_pose,
             f['code']['cv_seg']: self.cv_detect_seg,
-            f['code']['cv_depth']: self.cv_detect_depth
+            f['code']['cv_depth']: self.cv_detect_depth,
+            f['code']['cv_aruco']: self.cv_detect_aruco
         }
         try:
             cv_mode_list[self.cv_mode](frame)

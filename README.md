@@ -1727,24 +1727,28 @@ cd /root/ugv_rpi/yolo11_seg/
 - [x] **Запись видео с параллельным потоком** — GStreamer `tee` + `avenc_mjpeg` + `.mkv`.
 - [x] **YOLO26s** — более точная модель, INT8 (PCQ), 29 FPS.
 - [x] **YOLO11_pose** — 17 keypoints, скелет, 28 FPS.
-- [ ] **YOLO26_depth** — карта глубины (из Model Zoo v1.1.0).
-- [ ] **YOLO11_seg** — сегментация.
+- [x] **YOLO26_depth** — карта глубины (n-PCQ, 65 мс, 15 FPS).
+- [x] **YOLO11_seg** — сегментация (uint8, 45 мс, 22 FPS).
+- [x] **4 NPU-сервиса** + 4 Python-клиента (детекция, поза, глубина, сегментация).
+- [x] **Кнопки DEPTH/SEG** в веб-интерфейсе + отдельный блок NPU Depth/Seg.
 - [ ] **eMMC 200 МГц** — вернуть скорость (с бэкапом).
-- [ ] **Передача raw RGB в NPU-сервер (вместо JPEG)** — уменьшит отставание ещё.
+- [ ] **Передача raw RGB в NPU-сервер** (вместо JPEG) — уменьшит отставание.
 - [ ] **Мульти-клиент для NPU-сервера** (сейчас 1 клиент за раз).
 - [ ] **CSI-камера** — вторая камера (обзорная, на PT).
 - [ ] **GPU** — ускорение OpenCV (OpenCL).
 - [ ] **Переключатель камер** — USB / CSI в веб-интерфейсе.
 - [ ] **ArUco-маркеры** — логика парковки.
+- [ ] **Лидар D500** — SLAM + навигация.
 - [ ] **ESP32 (ИК, сонары)** — код для прошивки.
 
 ### Долгосрочное
 
 - [x] **MediaPipe Pose → YOLO11_pose (NPU)** — выполнено.
 - [ ] **MediaPipe Face** — заменить на NPU (по аналогии с pose).
-- [ ] **Автопилот** — SLAM или визуальная одометрия.
+- [ ] **SLAM** — Cartographer / slam_toolbox + лидар D500.
+- [ ] **Автопилот** — визуальная одометрия / навигация.
+- [ ] **Камера глубины** — Orbbec Gemini 335 или Intel RealSense D435i.
 - [ ] **Голосовое управление** — через `pyttsx3` + распознавание.
-
 
 
 ## 🔗 GitHub-репозиторий
@@ -1790,8 +1794,19 @@ cd /root/ugv_rpi/yolo11_seg/
 - **2026-10-03:** Переключение режима камеры (1080p30 ↔ 720p60) по кнопке WebRTC. RES-индикатор в OSD. Динамический FPS-лимит в `generate_frames`. Проверено с NPU и записью.
 - **2026-10-05:** YOLO11s сконвертирована в INT8 (`.nb` 6.6 МБ), C++ демо собрано нативно на Orange Pi, тест пройден (27 FPS, `dog: 92%`). Пайплайн: Allwinner Model Zoo v1.1.0 + ACUITY Toolkit 6.30.22 + Docker `ubuntu-npu:v2.0.10.2`. Папка `yolo11/` добавлена в репозиторий.
 - **2026-10-06:** YOLO26s INT8 (PCQ) сконвертирована, `npu_server` пересобран под YOLO26. FPS 29 (1080p30) / 60 (720p60). CPU ~36-38%. Удалённые объекты — лучше. Отставание <0.3 сек через NPU-сервер (UNIX-сокет). Папка `yolo26/` в репозитории. Commit `b83d513`.
-- **2026-10-06:** YOLO11_pose на NPU (17 keypoints, скелет). Второй NPU-сервер (npu-pose-server.service). Python-клиент. Асинхронный pose-воркер. Отрисовка скелета (17 keypoints). FPS ~28. Переключение OBJECTS ↔ MP POSE мгновенное. Commit `f8d8da8`.
-
+- **2026-10-06:** YOLO11_pose на NPU (17 keypoints, скелет). Второй NPU-сервер (`npu-pose-server.service`). Python-клиент. Асинхронный pose-воркер. Отрисовка скелета (17 keypoints). FPS ~28. Переключение OBJECTS ↔ MP POSE мгновенное. Commit `f8d8da8`.
+- **2026-10-07:** CQE-баг побеждён. Патч `cqhci_halt` (polling + очистка `CQHCI_CTL` + `ret = true`). eMMC HS400 @ **150 МГц**, скорость чтения **205 МБ/с** (было 80 на 50 МГц). Патчи в `patches/kernel/` (0001-cqhci, 0002-sun60iw2p1). Commit `064afa2`.
+- **2026-10-08:** Универсальный **auto-detect FPS** для камеры (`GstStream.detect_max_fps` — парсит `v4l2-ctl --list-formats-ext`, выбирает максимальный FPS для каждого разрешения). Кнопка WebRTC → переключение 1080p/720p с автоопределением. OSD показывает реальный режим (`720p30`, `720p60`). Commit `7eb80c0`.
+- **2026-10-08:** YOLO26_depth сконвертирован (n-PCQ 65 мс, ~15 FPS; n-int16 158 мс; s-int16 244 мс). `npu_depth_server` + `npu_depth_client.py`. Формат JSON: сетка 16×16 + near-RLE. Папка `yolo26_depth/` в репозитории.
+- **2026-10-08:** YOLO11_seg сконвертирован (uint8, 45 мс, ~22 FPS). `npu_seg_server` + `npu_seg_client.py`. RLE-сжатие масок. Папка `yolo11_seg/` в репозитории. Commit `99edae6`.
+- **2026-10-09:** Интеграция depth + seg в веб-интерфейс.
+  - `cv_ctrl.py`: воркеры `_npu_seg_worker`, `_npu_depth_worker` + отрисовка (heatmap, маски).
+  - `app.py`: `cmd_actions` для `T=10310` (DEPTH), `T=10311` (SEG).
+  - `templates/index.html`: новый блок **NPU Depth/Seg** (2 кнопки: DEPTH, SEG).
+  - `templates/control.js`: `sendCmdDepth()`, `sendCmdSeg()`, отдельная обработка `DSButtons`.
+  - `config.yaml`: `cv_depth: 10310`, `cv_seg: 10311`.
+  - `npu-seg-server.service` + `npu-depth-server.service` (systemd, автозапуск).
+  - Итог: **4 NPU-сервиса** работают параллельно (детекция, поза, глубина, сегментация).
 
 ---
 

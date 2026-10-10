@@ -148,14 +148,25 @@ class OpencvFuncs():
         self.track_color_iterate = f['cv']['track_color_iterate']
 
         # NPU YOLO11s (через Python-обёртку)
+        # Клиенты с таймаутом — не блокируют старт app.py
         from npu_client import NPUClient
-        self.npu_client = NPUClient()
         from npu_pose_client import NPUPoseClient
-        self.npu_pose_client = NPUPoseClient()
         from npu_seg_client import NPUSegClient
-        self.npu_seg_client = NPUSegClient()
         from npu_depth_client import NPUDepthClient
-        self.npu_depth_client = NPUDepthClient()
+
+        def _try_client(cls, name):
+            try:
+                client = cls()
+                print(f"[cv_ctrl] {name} connected", flush=True)
+                return client
+            except Exception as e:
+                print(f"[cv_ctrl] {name} not available: {e}", flush=True)
+                return None
+
+        self.npu_client = _try_client(NPUClient, 'NPUClient')
+        self.npu_pose_client = _try_client(NPUPoseClient, 'NPUPoseClient')
+        self.npu_seg_client = _try_client(NPUSegClient, 'NPUSegClient')
+        self.npu_depth_client = _try_client(NPUDepthClient, 'NPUDepthClient')
         from aruco_client import ArucoClient
         self.aruco_client = ArucoClient()
         self.npu_temp_path = "/tmp/yolo_input.jpg"

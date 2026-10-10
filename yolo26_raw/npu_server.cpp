@@ -28,7 +28,7 @@
 
 using namespace std;
 
-#define SOCKET_PATH "/tmp/npu11.sock"
+#define SOCKET_PATH "/tmp/npu11_raw.sock"
 
 // Внешние функции из yolo11_6_post.cpp и yolo11_6_pre.cpp
 struct Object {
@@ -207,7 +207,7 @@ int main(int argc, char** argv)
             if (!read_n(cli, raw_buf.data(), raw_size)) break;
 
             // Создаём cv::Mat из raw (BGR)
-            cv::Mat frame = cv::Mat(height, width, CV_8UC3, raw_buf.data()).clone();
+            cv::Mat frame(height, width, CV_8UC3, raw_buf.data());
 
             // Preprocess: Mat -> input_buffer
             preprocess_mat(frame, (unsigned char*)input_buffer_ptr, LETTERBOX_ROWS, LETTERBOX_COLS);

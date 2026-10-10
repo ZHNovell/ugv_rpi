@@ -28,15 +28,21 @@
 
 using namespace std;
 
-#define SOCKET_PATH "/tmp/npu11.sock"
+#define SOCKET_PATH "/tmp/npu_pose_raw.sock"
 
 // Внешние функции из yolo11_6_post.cpp и yolo11_6_pre.cpp
+struct KeyPoint {
+    cv::Point2f p;
+    float prob;
+};
+
 struct Object {
     cv::Rect_<float> rect;
     int label;
     float prob;
+    std::vector<KeyPoint> keypoints;
 };
-extern int detect_yolo26_6_post(const cv::Mat& bgr, std::vector<Object>& objects, float **output);
+extern int detect_yolo11_pose_9_post(const cv::Mat& bgr, std::vector<Object>& objects, float **output);
 
 // Класс для пересылки
 struct Detection {
@@ -44,6 +50,8 @@ struct Detection {
     string class_name;
     float confidence;
     float x0, y0, x1, y1;
+    vector<pair<float,float>> keypoints;   // (x, y)
+    vector<float> kp_probs;                // confidences
 };
 
 // COCO классы
@@ -94,10 +102,19 @@ static string detections_to_json(const vector<Detection>& dets)
         if (i > 0) s += ",";
         char buf[512];
         snprintf(buf, sizeof(buf),
-            "{\"class_id\":%d,\"class\":\"%s\",\"confidence\":%.4f,\"bbox\":[%.1f,%.1f,%.1f,%.1f]}",
+            "{\"class_id\":%d,\"class\":\"%s\",\"confidence\":%.4f,\"bbox\":[%.1f,%.1f,%.1f,%.1f],\"keypoints\":[",
             dets[i].class_id, dets[i].class_name.c_str(), dets[i].confidence,
             dets[i].x0, dets[i].y0, dets[i].x1, dets[i].y1);
         s += buf;
+        for (size_t k = 0; k < dets[i].keypoints.size(); k++) {
+            if (k > 0) s += ",";
+            char kb[64];
+            snprintf(kb, sizeof(kb), "[%.1f,%.1f,%.3f]",
+                dets[i].keypoints[k].first, dets[i].keypoints[k].second,
+                dets[i].kp_probs[k]);
+            s += kb;
+        }
+        s += "]}";
     }
     s += "]";
     return s;
@@ -134,12 +151,12 @@ int main(int argc, char** argv)
     const char* model_file = "/dev/shm/yolo11s_6_uint8_a733.nb";
     if (argc >= 2) model_file = argv[1];
 
-    fprintf(stderr, "[npu_raw_server] Loading model: %s\n", model_file);
+    fprintf(stderr, "[npu_pose_raw_server] Loading model: %s\n", model_file);
 
     // 1. NPU init
     NpuUint npu_uint;
     if (npu_uint.npu_init() != 0) {
-        fprintf(stderr, "[npu_raw_server] npu_init failed\n");
+        fprintf(stderr, "[npu_pose_raw_server] npu_init failed\n");
         return -1;
     }
 
@@ -147,14 +164,14 @@ int main(int argc, char** argv)
     NetworkItem net;
     unsigned int net_id = 0;
     if (net.network_create((char*)model_file, net_id) != 0) {
-        fprintf(stderr, "[npu_raw_server] network_create failed\n");
+        fprintf(stderr, "[npu_pose_raw_server] network_create failed\n");
         return -1;
     }
     if (net.network_prepare() != 0) {
-        fprintf(stderr, "[npu_raw_server] network_prepare failed\n");
+        fprintf(stderr, "[npu_pose_raw_server] network_prepare failed\n");
         return -1;
     }
-    fprintf(stderr, "[npu_raw_server] Model loaded, ready.\n");
+    fprintf(stderr, "[npu_pose_raw_server] Model loaded, ready.\n");
 
     // 3. Создаём UNIX-сокет
     unlink(SOCKET_PATH);
@@ -168,13 +185,13 @@ int main(int argc, char** argv)
 
     if (bind(srv, (struct sockaddr*)&addr, sizeof(addr)) < 0) { perror("bind"); return -1; }
     if (listen(srv, 4) < 0) { perror("listen"); return -1; }
-    fprintf(stderr, "[npu_raw_server] Listening on %s\n", SOCKET_PATH);
+    fprintf(stderr, "[npu_pose_raw_server] Listening on %s\n", SOCKET_PATH);
 
     // Получаем указатель на input-буфер
     void* input_buffer_ptr = nullptr;
     unsigned int input_buffer_size = 0;
     net.get_network_input_buff_info(0, &input_buffer_ptr, &input_buffer_size);
-    fprintf(stderr, "[npu_raw_server] input buffer ptr=%p size=%u\n", input_buffer_ptr, input_buffer_size);
+    fprintf(stderr, "[npu_pose_raw_server] input buffer ptr=%p size=%u\n", input_buffer_ptr, input_buffer_size);
 
     int output_cnt = net.get_output_cnt();
     float** output_data = new float*[output_cnt]();
@@ -183,7 +200,7 @@ int main(int argc, char** argv)
     while (true) {
         int cli = accept(srv, nullptr, nullptr);
         if (cli < 0) { perror("accept"); continue; }
-        fprintf(stderr, "[npu_raw_server] Client connected\n");
+        fprintf(stderr, "[npu_pose_raw_server] Client connected\n");
 
         while (true) {
             // Читаем заголовок raw BGR: width, height, channels (по 4 байта BE)
@@ -202,11 +219,9 @@ int main(int argc, char** argv)
             uint32_t raw_size = width * height * channels;
             if (raw_size > 20 * 1024 * 1024) break;
 
-            // Читаем raw BGR
             vector<unsigned char> raw_buf(raw_size);
             if (!read_n(cli, raw_buf.data(), raw_size)) break;
 
-            // Создаём cv::Mat из raw (BGR)
             cv::Mat frame = cv::Mat(height, width, CV_8UC3, raw_buf.data()).clone();
 
             // Preprocess: Mat -> input_buffer
@@ -225,19 +240,23 @@ int main(int argc, char** argv)
 
             // Postprocess -> detections
             vector<Object> objects;
-            detect_yolo26_6_post(frame, objects, output_data);
+            detect_yolo11_pose_9_post(frame, objects, output_data);
 
             // Конвертим в JSON
             vector<Detection> dets;
             for (const auto& obj : objects) {
                 Detection d;
                 d.class_id = obj.label;
-                d.class_name = (obj.label >= 0 && obj.label < 80) ? COCO_CLASSES[obj.label] : "unknown";
+                d.class_name = (obj.label == 0) ? "person" : "unknown";
                 d.confidence = obj.prob;
                 d.x0 = obj.rect.x;
                 d.y0 = obj.rect.y;
                 d.x1 = obj.rect.x + obj.rect.width;
                 d.y1 = obj.rect.y + obj.rect.height;
+                for (const auto& kp : obj.keypoints) {
+                    d.keypoints.push_back({kp.p.x, kp.p.y});
+                    d.kp_probs.push_back(kp.prob);
+                }
                 dets.push_back(d);
             }
             string json = detections_to_json(dets);
@@ -249,7 +268,7 @@ int main(int argc, char** argv)
         }
 
         close(cli);
-        fprintf(stderr, "[npu_raw_server] Client disconnected\n");
+        fprintf(stderr, "[npu_pose_raw_server] Client disconnected\n");
     }
 
     delete[] output_data;

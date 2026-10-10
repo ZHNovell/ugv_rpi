@@ -28,7 +28,7 @@ class NPUClient:
     def _connect(self):
         """Подключается к серверу. Если не удалось — ждёт."""
         attempts = 0
-        while True:
+        while attempts < 20:  # 20 × 0.5 = 10 секунд максимум
             try:
                 self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 self.sock.settimeout(self.timeout)
@@ -40,6 +40,7 @@ class NPUClient:
                 if attempts % 10 == 1:
                     print(f"[NPUClient] Waiting for server ({e})...", flush=True)
                 time.sleep(0.5)
+        raise ConnectionError(f"[NPUClient] Server {self.socket_path} not available after 10s")
 
     def detect(self, frame):
         """
@@ -47,18 +48,17 @@ class NPUClient:
         Возвращает список детекций:
             [{'class': 'dog', 'class_id': 16, 'confidence': 0.92, 'bbox': [x0,y0,x1,y1]}, ...]
         """
-        # Кодируем кадр в JPEG
-        ok, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        if not ok:
-            return []
-
-        jpeg_bytes = jpeg.tobytes()
-        jpeg_len = len(jpeg_bytes)
+        # Отправляем raw BGR (без JPEG)
+        h, w = frame.shape[:2]
+        channels = 3
 
         try:
-            # Отправляем длину + JPEG
-            self.sock.sendall(struct.pack('>I', jpeg_len))
-            self.sock.sendall(jpeg_bytes)
+            # Заголовок: width, height, channels (по 4 байта BE)
+            self.sock.sendall(struct.pack('>I', w))
+            self.sock.sendall(struct.pack('>I', h))
+            self.sock.sendall(struct.pack('>I', channels))
+            # Raw BGR
+            self.sock.sendall(frame.tobytes())
 
             # Читаем длину JSON
             json_len_data = self._recv_n(4)

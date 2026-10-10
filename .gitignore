@@ -66,3 +66,32 @@ output_depth_heatmap.jpg
 # Результаты seg демо
 out_yolo11_seg.png
 calib_frames/
+
+# RAW-серверы: build-артефакты
+yolo26_raw/build/
+yolo11_seg_raw/build/
+yolo11_pose_raw/build/
+yolo26_depth_raw/build/
+
+# Бэкапы
+*.jpeg_working
+*.jpeg_backup
+
+# static/ (тестовые кадры)
+static/
+
+# Демо-выходы
+yolo26_depth_raw/output_depth_heatmap.jpg
+yolo11_seg_raw/out_yolo11_seg.png
+
+# RAW-серверы: модели (уже есть в основных папках)
+yolo26_raw/model/*.nb
+yolo11_seg_raw/model/*.nb
+yolo11_pose_raw/model/*.nb
+yolo26_depth_raw/model/*.nb
+
+# RAW-серверы: модели в корне
+yolo11_pose_raw/*.nb
+yolo11_seg_raw/*.nb
+yolo26_raw/*.nb
+yolo26_depth_raw/*.nb

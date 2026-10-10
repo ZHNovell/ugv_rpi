@@ -97,6 +97,9 @@ class GstStream:
                         pass
 
         if max_fps > 0:
+            # Ограничение: 1080p — максимум 30 fps (USB 2.0 не тянет 60)
+            if height >= 1080:
+                max_fps = min(max_fps, 30)
             return int(round(max_fps))
 
         print(f"[GstStream] detect_max_fps: {target} not found in MJPG, fallback 30", flush=True)
@@ -106,7 +109,7 @@ class GstStream:
     def build_pipeline(self):
         pipeline_str = (
             f"v4l2src device={self.device} ! "
-            f"image/jpeg,width={self.width},height={self.height} ! "
+            f"image/jpeg,width={self.width},height={self.height},framerate={self.fps}/1 ! "
             f"jpegdec ! tee name=t "
             f"t. ! queue max-size-buffers=2 leaky=downstream ! "
             f"videoconvert ! video/x-raw,format=BGR ! "

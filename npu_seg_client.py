@@ -15,7 +15,7 @@ import time
 import cv2
 
 
-SOCKET_PATH = "/tmp/npu_seg.sock"
+SOCKET_PATH = "/tmp/npu_seg_raw.sock"
 
 
 class NPUSegClient:
@@ -27,7 +27,7 @@ class NPUSegClient:
 
     def _connect(self):
         attempts = 0
-        while True:
+        while attempts < 20:  # 20 × 0.5 = 10 секунд максимум
             try:
                 self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 self.sock.settimeout(self.timeout)
@@ -39,6 +39,7 @@ class NPUSegClient:
                 if attempts % 10 == 1:
                     print(f"[NPUSegClient] Waiting for server ({e})...", flush=True)
                 time.sleep(0.5)
+        raise ConnectionError(f"[NPUSegClient] Server {self.socket_path} not available after 10s")
 
     def detect(self, frame):
         """
@@ -49,16 +50,15 @@ class NPUSegClient:
               'mask_size': [w,h],
               'mask_rle': [[v,count], ...]}, ...]
         """
-        ok, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        if not ok:
-            return []
-
-        jpeg_bytes = jpeg.tobytes()
-        jpeg_len = len(jpeg_bytes)
+        # Отправляем raw BGR (без JPEG)
+        h, w = frame.shape[:2]
+        channels = 3
 
         try:
-            self.sock.sendall(struct.pack('>I', jpeg_len))
-            self.sock.sendall(jpeg_bytes)
+            self.sock.sendall(struct.pack('>I', w))
+            self.sock.sendall(struct.pack('>I', h))
+            self.sock.sendall(struct.pack('>I', channels))
+            self.sock.sendall(frame.tobytes())
 
             json_len_data = self._recv_n(4)
             if len(json_len_data) < 4:

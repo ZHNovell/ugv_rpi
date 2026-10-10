@@ -1,7 +1,7 @@
 # UGV Robot на Orange Pi 4 Pro — Концепция и дорожная карта
 
-* **Версия:** 1.0
-* **Последнее обновление:** 2026-10-08
+* **Версия:** 1.1
+* **Последнее обновление:** 2026-10-10
 * **Платформа:** Orange Pi 4 Pro (Allwinner A733, NPU 3 TOPS) + General Driver for Robots (ESP32) + шасси WAVE ROVER + 2-Axis Pan-Tilt (ST3215) + лидар D500
 
 ---

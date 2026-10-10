@@ -1941,6 +1941,41 @@ python3 camera_calibrate_v2.py
 5. **4 модели параллельно:** 5.6 FPS каждая. **По очереди:** 8.5-12 FPS.
 6. **NPU-драйвер** использует **C2, C4** (Cortex-A76) в **приоритете**.
 
+### Фиксация фокуса камеры (2026-10-10)
+
+**Проблема:** автофокус UGREEN «дышит» (меняет фокус), из-за чего видео размывается и ArUco теряет маркер.
+**Решение:** отключить автофокус и зафиксировать `focus_absolute`.
+
+**Проверка контролей:**
+```bash
+v4l2-ctl -d /dev/video0 --list-ctrls | grep -i focus
+```
+**Вывод:**
+```
+focus_absolute 0x009a090a (int) : min=0 max=1023 step=1 default=512 value=671
+focus_automatic_continuous 0x009a090c (bool) : default=1 value=1
+```
+**Установка:**
+```bash
+sudo v4l2-ctl -d /dev/video0 -c focus_automatic_continuous=0
+sudo v4l2-ctl -d /dev/video0 -c focus_absolute=671
+```
+**Автоматизация (ugv.service):**
+```ini
+ExecStartPre=/root/ugv_rpi/prepare_shm.sh
+ExecStartPre=/bin/sh -c "v4l2-ctl -d /dev/video0 -c focus_automatic_continuous=0 && v4l2-ctl -d /dev/video0 -c focus_absolute=671"
+ExecStart=/root/ugv_rpi/ugv-env/bin/python /root/ugv_rpi/app.py
+```
+**Результат:**
+
+Автофокус **выключен.**
+
+**Фокус зафиксирован на 671** (оптимально для ArUco на 20-100 см).
+
+Видео не **«дышит»**, ArUco **стабильнее.**
+
+
+
 
 ## 🚧 Что осталось
 
@@ -2038,6 +2073,7 @@ python3 camera_calibrate_v2.py
 - **2026-10-10:** ROADMAP пересмотрен. **Гибридный** подход (без ROS2) — **основной**. Добавлены разделы: **Sensor Fusion** (лидар + depth), **Лидарная защита** (< 0.4 м). SLAM — **Hector SLAM** (не Cartographer). Навигация — **VFH** (не Nav2).
 - **2026-10-10:** Стресс-тест NPU (4 модели, 720p60, 70 сек). CPU 16.4% avg / 41.7% max, TEMP 36 °C. 4 модели параллельно — 5.6 FPS. 720p60 быстрее 1080p30 на 20-36%.
 - **2026-10-10:** Полная калибровка камеры (шахматная доска 5×8, 30 мм, 25 кадров). RMS=0.3475. ArUco стал точнее: **±1 см на 1.35 м (~0.7%)** (было ±2 см, ~1.5%). Файл `camera_calib.npz` загружается в `aruco_client.py`.
+- **2026-10-10:** Фиксация фокуса камеры. `focus_automatic_continuous=0`, `focus_absolute=671`. Автоматизация через `ExecStartPre` в `ugv.service`. Цвет переключён на **green** (красный пересекается с оранжевым вечером). ArUco калибровка (RMS=0.3475), масштабирование `camera_matrix` под разрешение.
 ---
 
 **Последнее обновление:** 2026-10-09

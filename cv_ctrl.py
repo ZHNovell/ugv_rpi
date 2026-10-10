@@ -126,13 +126,22 @@ class OpencvFuncs():
         # color detection
         self.points = deque(maxlen=32)
         self.color_list = {
-                        'red':  [np.array([  0,200, 170]), np.array([ 10, 255, 255])],
+                        # Красный: нижний (0-13) и верхний (170-180)
+                        # S 100+, V 30+ — широкие (день + вечер)
+                        'red':  [np.array([  0, 100,  30]), np.array([ 13, 255, 255])],
+                        'red_high': [np.array([175, 150,  40]), np.array([180, 255, 255])],
                         'green':[np.array([ 50, 130, 130]), np.array([ 78, 255, 255])],
                         'blue': [np.array([ 90,160, 150]), np.array([105, 255, 255])]
                         }
+        self.color_dual = None
         if f['cv']['default_color'] in self.color_list:
             self.color_lower = self.color_list[f['cv']['default_color']][0]
             self.color_upper = self.color_list[f['cv']['default_color']][1]
+            if f['cv']['default_color'] == 'red':
+                self.color_dual = (
+                    self.color_list['red'][0], self.color_list['red'][1],
+                    self.color_list['red_high'][0], self.color_list['red_high'][1]
+                )
         else:
             self.color_lower = np.array(f['cv']['color_lower'])
             self.color_upper = np.array(f['cv']['color_upper'])
@@ -663,6 +672,14 @@ class OpencvFuncs():
         self.camera_mode = f"{new_h}p{real_fps}"
         print(f"[cv_ctrl] toggle_camera_mode -> {self.camera_mode}", flush=True)
 
+        # Пересоздаём ArUco-клиент с новым разрешением (масштаб калибровки)
+        try:
+            from aruco_client import ArucoClient
+            self.aruco_client = ArucoClient(frame_w=new_w, frame_h=new_h)
+            print(f"[cv_ctrl] ArucoClient recreated for {new_w}x{new_h}", flush=True)
+        except Exception as e:
+            print(f"[cv_ctrl] ArucoClient recreate error: {e}", flush=True)
+
     def video_record(self, input_cmd):
         print(f"[cv_ctrl] video_record called with {input_cmd}", flush=True)
         if input_cmd:
@@ -954,7 +971,14 @@ class OpencvFuncs():
         blurred = cv2.GaussianBlur(img, (11, 11), 0)
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
 
-        mask = cv2.inRange(hsv, self.color_lower, self.color_upper)
+        if self.color_dual is not None:
+            lo1, up1, lo2, up2 = self.color_dual
+            mask1 = cv2.inRange(hsv, lo1, up1)
+            mask2 = cv2.inRange(hsv, lo2, up2)
+            mask = cv2.bitwise_or(mask1, mask2)
+        else:
+            mask = cv2.inRange(hsv, self.color_lower, self.color_upper)
+
         mask = cv2.erode(mask, None, iterations=5)
         mask = cv2.dilate(mask, None, iterations=5)
 

@@ -65,3 +65,4 @@ output_depth_heatmap.jpg
 
 # Результаты seg демо
 out_yolo11_seg.png
+calib_frames/

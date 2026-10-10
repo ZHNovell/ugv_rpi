@@ -79,7 +79,7 @@ cv:
   - 110
   - 255
   - 255
-  default_color: blue
+  default_color: green
   min_radius: 12
   sampling_rad: 25
   track_acc_rate: 0.4

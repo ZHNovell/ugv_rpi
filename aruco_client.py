@@ -28,14 +28,37 @@ class ArucoClient:
         self.params = aruco.DetectorParameters()
         self.detector = aruco.ArucoDetector(self.aruco_dict, self.params)
 
-        # Матрица камеры (откалибрована)
-        center = (frame_w / 2, frame_h / 2)
-        self.camera_matrix = np.array([
-            [FOCAL_LENGTH, 0, center[0]],
-            [0, FOCAL_LENGTH, center[1]],
-            [0, 0, 1]
-        ], dtype=np.float64)
-        self.dist_coeffs = np.zeros((5, 1))
+        # Загружаем калибровку из файла (если есть)
+        import os
+        calib_path = '/root/ugv_rpi/camera_calib.npz'
+        if os.path.exists(calib_path):
+            data = np.load(calib_path)
+            self.camera_matrix = data['camera_matrix'].copy()
+            self.dist_coeffs = data['dist_coeffs']
+            self.calib_w = int(data.get('frame_w', 1280))
+            self.calib_h = int(data.get('frame_h', 720))
+
+            # Масштабируем под текущее разрешение (если отличается)
+            if (self.calib_w != frame_w) or (self.calib_h != frame_h):
+                scale_x = frame_w / self.calib_w
+                scale_y = frame_h / self.calib_h
+                self.camera_matrix[0, 0] *= scale_x  # fx
+                self.camera_matrix[1, 1] *= scale_y  # fy
+                self.camera_matrix[0, 2] *= scale_x  # cx
+                self.camera_matrix[1, 2] *= scale_y  # cy
+                print(f"[ArucoClient] Scaled calibration: {self.calib_w}x{self.calib_h} -> {frame_w}x{frame_h} (scale={scale_x:.2f})")
+            else:
+                print(f"[ArucoClient] Loaded calibration (RMS={data['rms']:.4f})")
+        else:
+            # Fallback: приблизительная калибровка
+            center = (frame_w / 2, frame_h / 2)
+            self.camera_matrix = np.array([
+                [FOCAL_LENGTH, 0, center[0]],
+                [0, FOCAL_LENGTH, center[1]],
+                [0, 0, 1]
+            ], dtype=np.float64)
+            self.dist_coeffs = np.zeros((5, 1))
+            print(f"[ArucoClient] WARNING: using approximate calibration (focal={FOCAL_LENGTH})")
 
         # 3D-координаты углов маркера (центр — начало координат)
         half = MARKER_SIZE_M / 2

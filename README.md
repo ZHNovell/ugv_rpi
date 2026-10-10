@@ -2037,7 +2037,155 @@ Python (frame.tobytes()) -> UNIX-сокет -> C++ (cv::Mat из raw) -> NPU
 - Или — гибрид: RAW для OBJECTS (постоянно), JPEG для остальных (по требованию).
 
 **Для робота:** в поочерёдном режиме (навигация) RAW даёт +35% FPS — это важнее. Параллельный режим — только для демо.
+### Процесс перевода сервера на RAW BGR
 
+Для каждого из 4 серверов (YOLO26s, YOLO11_seg, YOLO11_pose, YOLO26_depth):
+
+**1. Копируем папку сервера в `_raw`:**
+```bash
+cp -r yolo26 yolo26_raw
+cd yolo26_raw
+```
+
+**2. Правим `npu_server.cpp` — меняем приём JPEG на raw BGR.**
+
+Было (JPEG):
+```cpp
+uint32_t jpeg_len_be;
+if (!read_n(cli, &jpeg_len_be, 4)) break;
+uint32_t jpeg_len = ntohl(jpeg_len_be);
+if (jpeg_len == 0 || jpeg_len > 10 * 1024 * 1024) break;
+
+vector<unsigned char> jpeg_buf(jpeg_len);
+if (!read_n(cli, jpeg_buf.data(), jpeg_len)) break;
+
+cv::Mat frame = cv::imdecode(jpeg_buf, cv::IMREAD_COLOR);
+```
+
+Стало (RAW):
+```cpp
+uint32_t width_be, height_be, channels_be;
+if (!read_n(cli, &width_be, 4)) break;
+if (!read_n(cli, &height_be, 4)) break;
+if (!read_n(cli, &channels_be, 4)) break;
+
+uint32_t width = ntohl(width_be);
+uint32_t height = ntohl(height_be);
+uint32_t channels = ntohl(channels_be);
+
+if (width == 0 || height == 0 || channels != 3) break;
+if (width > 4096 || height > 4096) break;
+
+uint32_t raw_size = width * height * channels;
+if (raw_size > 20 * 1024 * 1024) break;
+
+vector<unsigned char> raw_buf(raw_size);
+if (!read_n(cli, raw_buf.data(), raw_size)) break;
+
+cv::Mat frame = cv::Mat(height, width, CV_8UC3, raw_buf.data()).clone();
+```
+
+**Важно:** `.clone()` — обязательно, иначе данные raw_buf уничтожаются после выхода из блока.
+
+**3. Меняем SOCKET_PATH на `_raw`:**
+```cpp
+#define SOCKET_PATH "/tmp/npu11_raw.sock"   // было /tmp/npu11.sock
+```
+
+**4. Правим `build_native.sh`:**
+```bash
+# SRC_DIR указывает на папку _raw (не на Model Zoo)
+SRC_DIR=${REPO_DIR}
+
+# Добавляем mkdir -p
+mkdir -p "${SRC_DIR}"
+
+# Удаляем опечатки Model Zoo (если есть)
+rm -f "${SRC_DIR}/yolov26_6_post.cpp" "${SRC_DIR}/yolov26_6_pre.cpp"
+```
+
+**5. Собираем:**
+```bash
+./build_native.sh
+# Копируем вручную (если cp: same file)
+cp -f build/npu_server ./npu_server
+```
+
+**6. Правим `npu_client.py` — отправка raw BGR.**
+
+Было (JPEG):
+```python
+ok, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+jpeg_bytes = jpeg.tobytes()
+self.sock.sendall(struct.pack('>I', len(jpeg_bytes)))
+self.sock.sendall(jpeg_bytes)
+```
+
+Стало (RAW):
+```python
+h, w = frame.shape[:2]
+self.sock.sendall(struct.pack('>I', w))
+self.sock.sendall(struct.pack('>I', h))
+self.sock.sendall(struct.pack('>I', 3))
+self.sock.sendall(frame.tobytes())
+```
+
+**7. Меняем SOCKET_PATH в клиенте:**
+```python
+SOCKET_PATH = "/tmp/npu11_raw.sock"
+```
+
+**8. Добавляем таймаут в `_connect` (10 сек):**
+```python
+attempts = 0
+while attempts < 20:  # 20 × 0.5 = 10 секунд
+    try:
+        ...
+        return
+    except (FileNotFoundError, ConnectionRefusedError) as e:
+        attempts += 1
+        time.sleep(0.5)
+raise ConnectionError(f"[NPUClient] Server {self.socket_path} not available after 10s")
+```
+
+**9. Обновляем systemd-сервис:**
+```bash
+sudo sed -i 's|/root/ugv_rpi/yolo26/|/root/ugv_rpi/yolo26_raw/|g' /etc/systemd/system/npu-server.service
+sudo systemctl daemon-reload
+sudo systemctl restart npu-server.service
+```
+
+**10. Проверяем:**
+```bash
+ls -la /tmp/npu11_raw.sock
+ps aux | grep npu_server | grep -v grep
+# Должен быть процесс из папки _raw
+```
+
+**Повторить для:**
+- `yolo26` -> `yolo26_raw`
+- `yolo11_seg` -> `yolo11_seg_raw`
+- `yolo11_pose` -> `yolo11_pose_raw`
+- `yolo26_depth` -> `yolo26_depth_raw`
+
+### Изменения в `cv_ctrl.py`
+
+Клиенты создаются с таймаутом — не блокируют старт `app.py`:
+```python
+def _try_client(cls, name):
+    try:
+        client = cls()
+        print(f"[cv_ctrl] {name} connected", flush=True)
+        return client
+    except Exception as e:
+        print(f"[cv_ctrl] {name} not available: {e}", flush=True)
+        return None
+
+self.npu_client = _try_client(NPUClient, 'NPUClient')
+self.npu_pose_client = _try_client(NPUPoseClient, 'NPUPoseClient')
+self.npu_seg_client = _try_client(NPUSegClient, 'NPUSegClient')
+self.npu_depth_client = _try_client(NPUDepthClient, 'NPUDepthClient')
+```
 
 
 ## 🚧 Что осталось
@@ -2056,7 +2204,7 @@ Python (frame.tobytes()) -> UNIX-сокет -> C++ (cv::Mat из raw) -> NPU
 - [x] **YOLO11_seg** — сегментация (uint8, 45 мс, 22 FPS).
 - [x] **4 NPU-сервиса** + 4 Python-клиента (детекция, поза, глубина, сегментация).
 - [x] **Кнопки DEPTH/SEG** в веб-интерфейсе + отдельный блок NPU Depth/Seg.
-- [ ] **Передача raw RGB в NPU-сервер** (вместо JPEG) — уменьшит отставание.
+- [x] **Передача raw RGB в NPU-сервер** (вместо JPEG) — уменьшит отставание.
 - [ ] **Мульти-клиент для NPU-сервера** (сейчас 1 клиент за раз).
 - [ ] **CSI-камера** — вторая камера (обзорная, на PT).
 - [ ] **GPU** — ускорение OpenCV (OpenCL).

@@ -2288,7 +2288,7 @@ self.npu_depth_client = _try_client(NPUDepthClient, 'NPUDepthClient')
 - **2026-10-10:** RAW BGR для всех 4 NPU-серверов. Прирост FPS: OBJECTS +35%, POSE +57%, SEG +26%, DEPTH +25%. CPU max упал с 100% до 26%. GIL подтверждён как узкое место параллельного RAW. Commit `44dc299`.
 ---
 
-**Последнее обновление:** 2026-10-09
+**Последнее обновление:** 2026-10-10
 
 **PROJECT:** [PROJECT.md](https://github.com/ZHNovell/ugv_rpi/blob/main/PROJECT.md) 
 **ROADMAP:** [PROJECT.md](https://github.com/ZHNovell/ugv_rpi/blob/main/ROADMAP.md) 

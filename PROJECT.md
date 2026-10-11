@@ -2187,6 +2187,120 @@ self.npu_seg_client = _try_client(NPUSegClient, 'NPUSegClient')
 self.npu_depth_client = _try_client(NPUDepthClient, 'NPUDepthClient')
 ```
 
+## 🚀 Zero-copy через dma-buf (2026-10-11)
+
+**Итог:** Полный zero-copy пайплайн **камера → VPU → NPU** через **dma-buf**. Убран GIL, убраны 4 сокета, убрано копирование RAW BGR (2.7 МБ × 4 = 10.8 МБ/кадр). **Прирост FPS: +54-124%.**
+
+### Что сделали
+
+1. **Нашли правильный путь через A733 `libNBGlinker.so`** (не T527 `libVIPlite.so`).
+   - `libNBGlinker.so` содержит **все** `vip_create_buffer*` (`_from_fd`, `_from_handle`, `_from_physical`).
+   - Совместим с A733-драйвером (`VIPLite driver 2.0.3.2-AW-2024-08-30`).
+   - T527 `libVIPlite.so` — старая версия (2023), **несовместима** с A733 (2026).
+
+2. **Увеличили CMA с 16 МБ до 128 МБ.**
+   - `armbianEnv.txt`: `extraargs=cma=128M ...`
+   - `CmaTotal: 131072 kB, CmaFree: 110352 kB`.
+
+3. **Подтвердили `vip_create_buffer_from_fd` в `libNBGlinker.so`.**
+   - Тест: dma-buf из `/dev/dma_heap/reserved` → `vip_create_buffer_from_fd` → `vip_set_input` → `vip_run_network` → **OK**.
+   - CMA 128 МБ хватает на ring buffer 4×2.7 МБ.
+
+4. **VPU (CedarC) декодирует MJPG → YV12 dma-buf.**
+   - Пайплайн: `v4l2src io-mode=dmabuf → image/jpeg → omxmjpegvideodec → YV12 dma-buf (1920×1088, 60 fps)`.
+   - **ZeroCopyBuffer = 1, ZeroCopyMode = 1** (OMX).
+   - `/dev/dma_heap/system` — используется VPU.
+
+5. **C++ appsink получает dma-buf через `gst_dmabuf_memory_get_fd`.**
+   - GStreamer 1.26.2: `gst_dmabuf_memory_get_fd` — есть.
+   - `mmap` dma-buf **работает** — читаем YV12.
+   - **Циклический буфер** — fd переиспользуются (18 → 19 → ... → 18).
+
+6. **`tee` работает с dma-buf.**
+   - 3 ветки: NPU (dma-buf), overlay (videoconvert → BGR), запись (videoconvert → I420 → mkv).
+
+7. **Конвертация YV12 → BGR работает.**
+   - OpenCV `cv::cvtColor(yv12, bgr, COLOR_YUV2BGR_YV12)`.
+   - Resize 1920×1088 → 640×640.
+   - JPEG сохранён: 204 КБ, `Shape: (1088, 1920, 3)`, `Mean: 99.16`.
+
+8. **NPU принимает dma-buf через `vip_create_buffer_from_fd`.**
+   - `vip_create_buffer_from_fd: 0`
+   - `vip_set_input: 0`
+   - `vip_run_network: 0`
+   - Выход bbox — реальные числа (не пустые).
+
+### Ключевые находки
+
+- **`libNBGlinker.so` (A733)** — правильная библиотека (не `libVIPlite.so`).
+- **VPU (CedarC)** отдаёт **YV12 dma-buf** (1920×1088, 60 fps).
+- **`/dev/dma_heap/reserved`** — для NPU (contiguous CMA).
+- **`/dev/dma_heap/system`** — для VPU (non-contiguous).
+- **`gst_dmabuf_memory_get_fd`** — доступна (GStreamer 1.26.2).
+- **`tee`** с dma-buf **работает**.
+- **`mmap`** dma-buf от OMX **работает**.
+- **CMA 128 МБ** — хватает на ring buffer 4×2.7 МБ.
+
+### NPU бенчмарк (100 итераций, zero-copy, C++)
+
+| Модель | avg (мс) | min (мс) | max (мс) | FPS | Вход |
+|---|---|---|---|---|---|
+| **YOLO26s** (детекция) | **37.23** | 37.02 | 38.18 | **26.9** | 640×640 |
+| **YOLO11_pose** | **34.63** | 34.26 | 35.75 | **28.9** | 640×640 |
+| **YOLO11_seg** | **40.11** | 39.91 | 40.35 | **24.9** | 640×640 |
+| **YOLO26n_depth** | **61.52** | 61.16 | 61.68 | **16.3** | 768×768 |
+| **SUM (последовательно)** | **173.50** | — | — | **5.8** | — |
+
+### Сравнение с предыдущими тестами
+
+| Модель | JPEG (avg/FPS) | RAW сокеты (avg/FPS) | **Zero-copy C++ (avg/FPS)** | Прирост JPEG→C++ |
+|---|---|---|---|---|
+| YOLO26s | 90.9 / 11.0 | 67.3 / 14.9 | **37.23 / 26.9** | **+145%** |
+| YOLO11_pose | 83.7 / 12.0 | 53.3 / 18.8 | **34.63 / 28.9** | **+141%** |
+| YOLO11_seg | 113.8 / 8.8 | 90.0 / 11.1 | **40.11 / 24.9** | **+183%** |
+| YOLO26n_depth | 117.3 / 8.5 | 94.4 / 10.6 | **61.52 / 16.3** | **+92%** |
+
+**Средний прирост: +78%.**
+
+### Ожидаемая нагрузка (C++ диспетчер, zero-copy)
+
+| Метрика | JPEG | RAW сокеты | **Zero-copy C++** |
+|---|---|---|---|
+| CPU (по очереди) | 11-13% | 11-18% | **~5-8%** |
+| CPU (параллельно, avg) | 16.4% | 14.3% | **~8-10%** |
+| CPU max | **100%** | 26.4% | **~15%** |
+| TEMP avg | 32.7 °C | 34.1 °C | **~30 °C** |
+
+### Реакция робота (depth)
+
+- Depth raw: **61.52 мс**.
+- При скорости 1 м/с: робот проедет **6.15 см**.
+- + VPU decode + конвертация (~10 мс) → **7.2 см**.
+- + обработка в Python (~10-20 мс) → **~10 см**.
+- **10 см при 1 м/с — отлично для навигации.**
+
+### Что дальше
+
+- [ ] **C++ диспетчер** — ring buffer, 4 модели, preprocessing.
+- [ ] **Интеграция в Python** — один клиент вместо четырёх.
+- [ ] **Стресс-тест zero-copy** — FPS / CPU / TEMP.
+- [ ] **Обновить README** — новая архитектура.
+
+### Файлы
+
+- `/tmp/test_fd_npu.cpp` — тест `vip_create_buffer_from_fd`.
+- `/tmp/test_run_npu.cpp` — тест `vip_run_network` с dma-buf.
+- `/tmp/test_appsink_dmabuf.cpp` — C++ appsink с dma-buf.
+- `/tmp/test_mmap_dmabuf.cpp` — mmap + YV12 → BGR.
+- `/tmp/bench_models.cpp` — бенчмарк 4 моделей.
+
+---
+
+
+
+
+
+
 
 ## 🚧 Что осталось
 

@@ -1,4 +1,32 @@
-# PROJECT.md — Orange Pi 4 Pro UGV Robot
+
+
+![GitHub top language](https://img.shields.io/github/languages/top/ZHNovell/ugv_rpi)
+![GitHub language count](https://img.shields.io/github/languages/count/ZHNovell/ugv_rpi)
+![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/ZHNovell/ugv_rpi)
+![GitHub repo size](https://img.shields.io/github/repo-size/ZHNovell/ugv_rpi)
+![GitHub](https://img.shields.io/github/license/ZHNovell/ugv_rpi)
+![GitHub last commit](https://img.shields.io/github/last-commit/ZHNovell/ugv_rpi)
+<img width="1088" height="721" alt="261006200253" src="https://github.com/user-attachments/assets/368fbf34-2087-4e6b-b819-b5fca5f83acd" />
+
+# Orange Pi 4 Pro UGV Robot
+
+## 📖 О проекте
+
+**UGV-робот** на **Orange Pi 4 Pro** (Allwinner A733, NPU 3 TOPS) с **двумя NPU-серверами**:
+- **YOLO26s** — детекция объектов (29 FPS).
+- **YOLO11_pose** — позы людей (17 keypoints, 28 FPS).
+
+**Возможности:**
+- **Живой MJPEG-поток** с камеры (1080p30 / 720p60).
+- **Запись видео** (`.mkv`, без прерывания потока).
+- **NPU-инференс** через **UNIX-сокет** (отставание <0.3 сек).
+- **Веб-интерфейс** (Flask + Socket.IO).
+- **Управление** через **ESP32** (UART7).
+
+**Ключевые особенности:**
+- **Отставание рамок** — **<0.3 сек** (в 3 раза **быстрее** YOLO11s через subprocess).
+- **CPU** — **36-38%** (вместо 55%).
+- **Автозапуск** — `npu-server.service`, `npu-pose-server.service`, `ugv.service`.
 
 ## 📋 Общая архитектура
 
@@ -9,7 +37,7 @@
 - **General Driver for Robots** — Waveshare, ESP32-WROOM-32UE, 2×MX1919, INA219, OLED SSD1306 (0x3C).
 - **2-Axis Pan-Tilt Camera Module** — сервоприводы ST3215, UART.
 - **Шасси WAVE ROVER** — 4 мотора, 4 энкодера, 3S Li-Ion UPS.
-- **USB-камера** — Logitech C920 HD Pro Webcam (навигационная).
+- **USB-камера** — (навигационная).
 - **CSI-камера** — (опционально, обзорная).
 
 **Архитектура управления:**
@@ -331,109 +359,244 @@ ls -la /dev/vipcore
 lsmod | grep vipcore
 # vipcore 270336 0
 ```
-### Model Zoo (YOLOv5s)
+### YOLO26s + устранение отставания через NPU-сервер
+
+**Итог:** YOLO26s INT8 (PCQ) работает на NPU A733. **Отставание рамок < 0.3 сек** (было ~1 сек). Архитектура — **постоянный C++ NPU-сервер через UNIX-сокет** (вместо `subprocess.run` на каждый кадр).
+
+### Почему YOLO26s лучше YOLO11s
+
+Три ключевых улучшения:
+1. **DFL-free** (убран Distribution Focal Loss) — голова проще, лучше квантизуется.
+2. **NMS-free** — постобработка ~6 мс вместо ~11 мс.
+3. **ProgLoss + STAL** — лучше детектит мелкие и удалённые объекты.
+
+### Проблема с `subprocess` (решение от 2026-10-05)
+
+Первая версия (YOLO11s) вызывала демо через `subprocess.run()` на каждый кадр:
+- **fork + exec** — ~20-50 мс.
+- **Загрузка `.nb` (6.6 МБ)** с eMMC 52 МГц — ~100-130 мс.
+- **`cv2.imwrite` + `cv2.imread`** — ~20-30 мс.
+- **Итого ~200-300 мс** на цикл → **отставание ~0.7-1 сек**.
+
+### Решение: NPU-сервер через UNIX-сокет
+
+**C++ сервер `npu_server`** (`yolo26/npu_server.cpp`):
+- Загружает модель **ОДИН РАЗ** при старте.
+- Слушает UNIX-сокет `/tmp/npu11.sock`.
+- Принимает JPEG-кадры от Python (4 байта длины BE + JPEG).
+- Декодирует, letterbox 640×640, запускает NPU.
+- Постобработка (`detect_yolo26_6_post`).
+- Возвращает JSON (4 байта длины BE + JSON).
+
+**Python-клиент `npu_client.py`:**
+- Подключается к сокету (с автопереподключением).
+- `detect(frame)` — отправляет JPEG, получает список детекций.
+- Асинхронный воркер `_npu_worker` в `cv_ctrl.py` — крутится в отдельном потоке, обновляет `self.overlay`.
+
+### Результаты YOLO26s vs YOLO11s
+
+| Метрика | YOLO11s | YOLO26s |
+|---|---|---|
+| FPS 1080p30 | 26 | **29** |
+| FPS 720p60 | 57 | **60** |
+| CPU 1080p30 | 39% | **36-38%** |
+| CPU 720p60 | 35% | **36%** |
+| Удалённые объекты | часто терялись | **лучше** |
+| Мигание (статика) | иногда | **нет** |
+| Отставание | <0.3 сек | **<0.3 сек** |
+
+**Температура** — ниже (меньше CPU → меньше тепла).
+
+### Протокол
+
+```
+Клиент -> Сервер: [4 байта BE: длина JPEG] [JPEG bytes]
+Сервер -> Клиент: [4 байта BE: длина JSON] [JSON bytes]
+
+JSON: [{"class_id": 16, "class": "dog", "confidence": 0.92, "bbox": [x0,y0,x1,y1]}, ...]
+```
+
+### Автозапуск
+
+**`/etc/systemd/system/npu-server.service`:**
+```ini
+[Unit]
+Description=NPU Server for YOLO26s (A733)
+After=network.target
+Before=ugv.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/ugv_rpi/yolo26
+Environment=LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733
+ExecStartPre=/root/ugv_rpi/prepare_shm.sh
+ExecStart=/root/ugv_rpi/yolo26/npu_server /dev/shm/yolo26s_6_pcq_a733.nb
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**`ugv.service`** — `After=network.target npu-server.service` + `Requires=npu-server.service`.
+
+**`prepare_shm.sh`** — копирует YOLO26 модель в `/dev/shm/` (RAM-диск) при старте.
+
+### Пайплайн конвертации YOLO26s (PCQ)
+
+1. **Скачать** `yolo26s.pt` (Ultralytics).
+2. **Экспорт ONNX** (opset 16): `yolo export model=yolo26s.pt format=onnx simplify=True dynamic=False opset=16`.
+3. **Вырезать 6 выходов** через `onnx_extract.py`:
+   - `/model.23/Reshape_output_0` (`[1, 4, 6400]` — bbox, stride 8)
+   - `/model.23/Reshape_1_output_0` (`[1, 4, 1600]`)
+   - `/model.23/Reshape_2_output_0` (`[1, 4, 400]`)
+   - `/model.23/Reshape_3_output_0` (`[1, 80, 6400]` — classes)
+   - `/model.23/Reshape_4_output_0` (`[1, 80, 1600]`)
+   - `/model.23/Reshape_5_output_0` (`[1, 80, 400]`)
+4. **Docker ACUITY** (`ubuntu-npu:v2.0.10.2`):
+   - `./pegasus_import.sh yolo26s_6`
+   - `./pegasus_quantize.sh yolo26s_6 pcq 12` ← **PCQ**, не uint8.
+   - `./pegasus_export_ovx_nbg.sh yolo26s_6 pcq a733`
+5. **Результат:** `yolo26s_6_pcq_a733.nb` (9 МБ).
+
+### Нативная сборка NPU-сервера на Orange Pi
+
 ```bash
-cd /root
-wget https://dl.radxa.com/cubie/allwinner-model-zoo.tar.gz
-tar -xzf allwinner-model-zoo.tar.gz
-
-cd /root/awnpu_model_zoo-v0.9.0-*/3rdparty/opencv/
-unzip opencv-4.9.0-aarch64-linux-sunxi-glibc.zip
+cd /root/ugv_rpi/yolo26/
+./build_native.sh
 ```
 
-### Сборка YOLOv5s демо
+**Ключевые фиксы `CMakeLists.txt.patched`:**
+1. `SYS_ARCH=linux_aarch64` — принудительно.
+2. OpenCV через `pkg-config` — не `find_package`.
+3. Убрать `_GLIBCXX_USE_CXX11_ABI=0` — иначе конфликт с системным OpenCV 4.10.
+4. `MODEL_ZOO_HOME_DIR` — абсолютный путь.
+5. `static` у `detect_yolo26_6_post` — убран (для экспорта).
+6. Исключить `yolo11_6_*.cpp` из сборки (конфликтуют с YOLO26).
+7. `main.cpp` — исключён из `npu_server` (у него свой `main`).
+
+### Файлы в репозитории
+
+- `yolo26/` — папка YOLO26s (модель, сервер, скрипты, README).
+- `yolo11/` — папка YOLO11s (остаётся как история).
+- `npu_client.py` — Python-клиент (общий для YOLO11/YOLO26).
+- `prepare_shm.sh` — копирование `.nb` в RAM.
+- `/etc/systemd/system/npu-server.service` — автозапуск.
+
+### YOLO11_pose на NPU — скелет в реальном времени
+
+**Итог:** YOLO11_pose работает на NPU A733 через **второй NPU-сервер** (`npu_pose_server`, сокет `/tmp/npu_pose.sock`). **Заменяет MediaPipe Pose** (который не работает на A733). Кнопка **MP POSE** в веб-интерфейсе теперь использует **NPU-инференс**.
+
+### Что нового
+
+1. **YOLO11_pose INT8 (uint8)** сконвертирована в `.nb` (7 МБ).
+2. **Второй NPU-сервер** — `npu_pose_server` (по аналогии с YOLO26).
+3. **Python-клиент** — `npu_pose_client.py` (подключается к `/tmp/npu_pose.sock`).
+4. **Асинхронный pose-воркер** в `cv_ctrl.py` — `_npu_pose_worker`.
+5. **Отрисовка скелета** — 17 keypoints + 19 соединений (COCO skeleton).
+6. **Автозапуск** — `npu-pose-server.service`.
+
+### Архитектура
+
+```
+Клиент (cv_ctrl.py)          Сервер (npu_pose_server)
+        |                              |
+        |--- JPEG (4 байта + данные) ->|
+        |                              | decode + letterbox 640×640
+        |                              | NPU inference (YOLO11_pose)
+        |                              | detect_yolo11_pose_9_post
+        |<- JSON (4 байта + данные) ---|
+        |                              |
+   рисуем bbox + скелет                |
+```
+
+**Сокеты:**
+- `/tmp/npu11.sock` — YOLO26s (детекция объектов).
+- `/tmp/npu_pose.sock` — YOLO11_pose (17 keypoints).
+
+**Оба сервера работают параллельно**, переключение — **мгновенное** (без subprocess).
+
+### Модель
+
+- **9 выходов**: bbox (cv2) + class (cv3) + keypoints (cv4) × 3 уровня (80×80, 40×40, 20×20).
+- **1 класс** — person.
+- **17 keypoints** COCO: нос, глаза, уши, плечи, локти, запястья, бёдра, колени, лодыжки.
+- **Detection time**: ~62 мс.
+- **FPS**: ~28 (с отрисовкой скелета).
+- **CPU**: минимальная нагрузка.
+
+### Пайплайн конвертации
+
+1. **`yolo11s-pose.pt`** (Ultralytics) → ONNX (opset 15).
+2. **`onnx_extract.py`** — вырезать 9 выходов (cv2/cv3/cv4 × 3 уровня).
+3. **Docker ACUITY** (`ubuntu-npu:v2.0.10.2`):
+   - `./pegasus_import.sh yolo11s-pose_9`
+   - `./pegasus_quantize.sh yolo11s-pose_9 uint8 12`
+   - `./pegasus_export_ovx_nbg.sh yolo11s-pose_9 uint8 a733`
+4. **Результат:** `yolo11s-pose_9_uint8_a733.nb` (7 МБ).
+
+### Нативная сборка
+
 ```bash
-cd /root/awnpu_model_zoo-v0.9.0-*/examples/yolov5
-mkdir -p build && cd build
+cd /root/ugv_rpi/yolo11_pose/
+./build_native.sh
+```
+**Ключевые фиксы** (аналогично YOLO26):
+1. `SYS_ARCH=linux_aarch64`.
+2. OpenCV через `pkg-config`.
+3. Убрать `_GLIBCXX_USE_CXX11_ABI=0`.
+4. `MODEL_ZOO_HOME_DIR` — абсолютный путь.
+5. Исключить `main.cpp`, `npu_server.cpp`, `npu_pose_server.cpp`, `yolo11_6_*.cpp` из сборки.
+6. Собирать только `npu_pose_server`.
 
-sed -i 's|elseif(CMAKE_C_COMPILER MATCHES "aarch64")|elseif(TARGET_NAME STREQUAL "A733")|' ../CMakeLists.txt
+### Автозапуск
 
-cmake .. -DTARGET_NAME=A733 -DCMAKE_SYSTEM_NAME=Linux
-make -j4
+**`/etc/systemd/system/npu-pose-server.service`:**
+```ini
+[Unit]
+Description=NPU Pose Server for YOLO11_pose (A733)
+After=network.target
+Before=ugv.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/ugv_rpi/yolo11_pose
+Environment=LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733
+ExecStartPre=/bin/sh -c 'cp /root/ugv_rpi/yolo11_pose/yolo11s-pose_9_uint8_a733.nb /dev/shm/ 2>/dev/null || true'
+ExecStart=/root/ugv_rpi/yolo11_pose/npu_pose_server /dev/shm/yolo11s-pose_9_uint8_a733.nb
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-### Запуск YOLOv5s
-```bash
-cd /root/awnpu_model_zoo-v0.9.0-*/examples/yolov5/build
-LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-*/common/npuruntime/lib_linux_aarch64/A733 \
-./yolov5_demo_a733 -nb ../model/yolov5s_rt_uint8_a733.nb \
--i ../model/dog.jpg -l 1 -m 10
-```
+### Интеграция с роботом
 
-### Результат:
-```text
-detection num: 3
-16:  91%, [ 135,  221,  311,  535], dog
- 2:  67%, [ 470,   74,  688,  173], car
- 1:  61%, [ 155,  118,  573,  424], bicycle
-Скорость: ~25 мс на кадр (~39 FPS).
-```
+- **Кнопка MP POSE** (T=10309) → `set_cv_mode(mp_pose)` → **запуск pose-воркера**.
+- **Переключение OBJECTS ↔ MP POSE** — **мгновенное**.
+- **Отрисовка:** bbox + label + 17 keypoints (красные кружки) + 19 соединений (жёлтые линии).
+- **Фильтр по confidence** — keypoints с `prob > 0.3`.
 
-**Важно:** если LD_LIBRARY_PATH не указать — будет error while loading shared libraries: libNBGlinker.so.
+### Файлы в репозитории
 
-## 🐍 Python-обёртка для NPU (`yolov5_npu.py`)
+- `yolo11_pose/` — папка YOLO11_pose (модель, сервер, скрипты, README).
+- `npu_pose_client.py` — Python-клиент (в корне репозитория).
+- `/etc/systemd/system/npu-pose-server.service` — автозапуск.
 
-**Файл:** `~/ugv_rpi/yolov5_npu.py`
+## 🐍 NPU-сервер (YOLO26s + YOLO11_pose)
 
-**Назначение:** Вызов YOLOv5s на NPU из Python через `subprocess`.
+- npu_server (YOLO26s) — сокет /tmp/npu11.sock.
 
-```python
-"""
-Python-обёртка для YOLOv5s на NPU через subprocess.
-Вызывает yolov5_demo_a733 и парсит результат.
-"""
-import subprocess
-import re
-import os
+- npu_pose_server (YOLO11_pose) — сокет /tmp/npu_pose.sock.
 
-# Актуальные пути (после распаковки Model Zoo)
-DEMO_PATH = "/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov5/build/yolov5_demo_a733"
-MODEL_PATH = "/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov5/model/yolov5s_rt_uint8_a733.nb"
-LD_LIBRARY_PATH = "/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733"
+- Python-клиенты — npu_client.py, npu_pose_client.py.
 
+- Автозапуск — npu-server.service, npu-pose-server.service.
 
-def detect(image_path):
-    """
-    Запускает YOLOv5s на NPU для указанного изображения.
-    Возвращает список детекций.
-    """
-    env = os.environ.copy()
-    env['LD_LIBRARY_PATH'] = LD_LIBRARY_PATH
-
-    result = subprocess.run(
-        [DEMO_PATH, '-nb', MODEL_PATH, '-i', image_path, '-l', '1', '-m', '10'],
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=30
-    )
-
-    detections = []
-    lines = result.stderr.split('\n')  # ВАЖНО: stderr, а не stdout!
-    for line in lines:
-        match = re.match(r'\s*(\d+):\s+(\d+)%,\s+\[\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\],\s+(\w+)', line)
-        if match:
-            class_id = int(match.group(1))
-            confidence = int(match.group(2)) / 100.0
-            x0, y0, x1, y1 = map(int, match.groups()[2:6])
-            class_name = match.group(7)
-            detections.append({
-                'class': class_name,
-                'class_id': class_id,
-                'confidence': confidence,
-                'bbox': [x0, y0, x1, y1]
-            })
-
-    return detections
-
-
-if __name__ == '__main__':
-    image = "/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/examples/yolov5/model/dog.jpg"
-    print(f"Testing on {image}...")
-    detections = detect(image)
-    for det in detections:
-        print(f"  {det['class']}: {det['confidence']*100:.0f}% at {det['bbox']}")
-```
+- .nb в /dev/shm — prepare_shm.sh.
 
 ## 🔧 Адаптация кода `ugv_rpi`
 
@@ -559,22 +722,26 @@ self.net = cv2.dnn.readNetFromCaffe(thisPath + '/models/deploy.prototxt', ...)
 self.class_names = [...]
 
 # Стало:
-import yolov5_npu
-self.yolov5_npu = yolov5_npu
-self.npu_temp_path = "/tmp/yolo_input.jpg"
+from npu_client import NPUClient
+self.npu_client = NPUClient()
+from npu_pose_client import NPUPoseClient
+self.npu_pose_client = NPUPoseClient()
 ```
 
 **Изменение 5:** Функция `cv_detect_objects` — использует NPU.
 
 ```python
 def cv_detect_objects(self, img):
+    """
+    Legacy-функция. Реально cv_objs обрабатывается в _npu_worker через сокет.
+    Эта функция вызывается только если что-то сломалось в воркере.
+    """
     overlay_buffer = np.zeros_like(img)
-    cv2.putText(overlay_buffer, 'NPU YOLOv5s', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-
-    cv2.imwrite(self.npu_temp_path, img)
+    cv2.putText(overlay_buffer, 'NPU YOLO26s', (50, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
     try:
-        detections = self.yolov5_npu.detect(self.npu_temp_path)
+        detections = self.npu_client.detect(img)   # ← сокет, не subprocess
     except Exception as e:
         print(f"[cv_detect_objects] NPU error: {e}")
         self.overlay = overlay_buffer
@@ -582,10 +749,12 @@ def cv_detect_objects(self, img):
 
     for det in detections:
         x0, y0, x1, y1 = det['bbox']
+        x0, y0, x1, y1 = int(round(x0)), int(round(y0)), int(round(x1)), int(round(y1))
         label = f"{det['class']}: {det['confidence']*100:.0f}%"
         cv2.rectangle(overlay_buffer, (x0, y0), (x1, y1), (0, 255, 0), 2)
         y = y0 - 10 if y0 - 10 > 10 else y0 + 20
-        cv2.putText(overlay_buffer, label, (x0, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        cv2.putText(overlay_buffer, label, (x0, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
     self.overlay = overlay_buffer
 ```
@@ -704,11 +873,28 @@ function speedCtrl(inputSpd){
 ### `templates/style.css`
 
 ```css
-.video img{
+.video{
     width: 960px;
     height: 540px;
+    overflow: hidden;
+}
+.video img{
+    width: 100%;
+    height: 100%;
     border-radius: 4px;
     object-fit: contain;
+}
+
+/* Родительский контейнер страницы */
+main {
+    width: 1600px;
+    margin: auto;
+}
+
+/* Секция с видео */
+.box1 .section_video{
+    width: 1000px;
+    margin-right: 10px;
 }
 ```
 
@@ -723,14 +909,15 @@ socket.on('update', function(data) {
 });
 ```
 
-## 🚀 Автозапуск `app.py` (systemd)
+## 🚀 Автозапуск `app.py` (systemd) + смотреть выше (npu-server.service, npu-pose-server.service)
 
 **Файл:** `/etc/systemd/system/ugv.service`
 
 ```ini
 [Unit]
 Description=UGV Robot App
-After=network.target
+After=network.target npu-server.service npu-pose-server.service
+Requires=npu-server.service npu-pose-server.service
 
 [Service]
 Type=simple
@@ -785,12 +972,15 @@ journalctl -u ugv.service -f
 | None | 10301 | Отключить детекцию |
 | Motion | 10302 | Детекция движения |
 | Faces | 10303 | Детекция лиц |
-| Objects | 10304 | Детекция объектов (NPU YOLOv5s) |
+| Objects | 10304 | Детекция объектов (NPU YOLO26s) |
 | Color | 10305 | Детекция цвета |
 | Hand GS | 10306 | Жесты рук |
 | Auto | 10307 | Авто-режим |
-| MP Face | 10308 | MediaPipe Face |
-| MP Pose | 10309 | MediaPipe Pose |
+| MP Face | 10308 | MediaPipe Face (не работает — нет mediapipe) |
+| MP Pose | 10309 | NPU YOLO11_pose (17 keypoints) |
+| Depth | 10310 | NPU YOLO26n_depth (карта глубины) |
+| Seg | 10311 | NPU YOLO11_seg (маски) |
+| ArUco | 10312 | ArUco-маркеры (OpenCV CPU, ±2 см) |
 
 ### Формат отправки (через `base_ctrl.py`)
 
@@ -804,12 +994,10 @@ cmdline_ctrl('base -c {"T":10304}')
 # → UART7: {"T":10304}\n
 ```
 
-## 🆕 Обновления (2026-09-29)
-
-### 📷 USB-камера (Logitech C920 HD Pro)
+### 📷 USB-камера (универсальная, UVC)
 
 **Подключение:**
-- Камера подключена в USB 2.0 порт Orange Pi 4 Pro.
+- Камера подключается в USB-порт Orange Pi 4 Pro.
 - Определяется как `/dev/video0` и `/dev/video1`.
 - Модуль `uvcvideo` загружается автоматически.
 
@@ -818,14 +1006,9 @@ cmdline_ctrl('base -c {"T":10304}')
 ```bash
 # Список устройств
 v4l2-ctl --list-devices
-# HD Pro Webcam C920 (usb-sunxi-ehci-1.1):
-#         /dev/video0
-#         /dev/video1
 
 # Поддерживаемые форматы
 v4l2-ctl -d /dev/video0 --list-formats-ext
-# YUYV (4:2:2): до 1920x1080 @ 5 FPS
-# MJPG (Motion-JPEG): до 1920x1080 @ 30 FPS
 
 # Тест захвата кадра
 fswebcam -d /dev/video0 --no-banner -r 1920x1080 -S 5 ./test.jpg
@@ -860,6 +1043,47 @@ def usb_camera_detection(self):
 ```
 
 **Преимущества:** работает для **любой** UVC-камеры, независимо от имени в `lsusb`.
+
+## 🎥 Универсальный auto-detect FPS (2026-10-08)
+**Проблема:** разные камеры поддерживают разные FPS для разных разрешений. Например:
+- UGREEN SM831: 1080p30, 4K30 (нет 60 fps).
+- Vitade (дешёвая): 1080p30, 720p30 (нет 60 fps).
+- WSD-p8002: 1080p60, 4K30.
+
+Если жёстко задать 720p60 — на камерах без 60 fps пайплайн GStreamer **не запускается**, видео пропадает.
+**Решение:** при переключении режима камера **сама определяет максимальный FPS** для выбранного разрешения через `v4l2-ctl --list-formats-ext`.
+
+**`GstStream.detect_max_fps(width, height, device)`:**
+- Парсит вывод `v4l2-ctl --list-formats-ext` (построчно, без регулярок).
+- Находит секцию **MJPG**.
+- Ищет нужное разрешение (`1920x1080`, `1280x720`).
+- Возвращает **максимальный** FPS для него.
+- Fallback — 30, если не найдено.
+**`GstStream.switch_mode(width, height, fps=None)`:**
+- Если `fps` не задан — вызывает `detect_max_fps`.
+- Пересоздаёт пайплайн с найденным FPS.
+- Сохраняет `self.fps` — реальный FPS.
+
+**`cv_ctrl.toggle_camera_mode()`:**
+- Определяет целевое разрешение по текущему `self.gst_stream.width` (1920 → 1280, иначе → 1920).
+- Вызывает `switch_mode(new_w, new_h)` **без fps**.
+- Формирует `self.camera_mode` динамически: `f"{height}p{real_fps}"` (например, `1080p30`, `720p30`, `720p60`).
+**`app.py` (generate_frames):**
+- FPS-лимит берётся из `cvf.gst_stream.fps` (реальный), а не из хардкода.
+
+**OSD:**
+- `camera_mode` передаётся в websocket **как строка** (`'720p30'`).
+- `control.js` выводит её напрямую в `res_mode` (без маппинга `'1' → '720p60'`).
+**Результат:**
+- Любая UVC-камера работает с максимальным FPS для каждого разрешения.
+- Нет пропадания видео при переключении.
+- OSD показывает **реальный** режим (например, `720p30`, а не `720p60`).
+
+**Файлы:**
+- `gst_stream.py` — `detect_max_fps`, `switch_mode(width, height, fps=None)`.
+- `cv_ctrl.py` — `toggle_camera_mode` без хардкода.
+- `app.py` — FPS-лимит из `gst_stream.fps`.
+- `templates/control.js` — `res_mode` = `data[camera_mode]` напрямую.
 
 ### 🎥 Запись видео — финальное решение (2026-10-02)
 
@@ -908,16 +1132,6 @@ v4l2src → image/jpeg (MJPG, 1920x1080@30) → jpegdec → tee
 - `get_video_names` в `app.py` — фильтр расширений: `.mp4`, `.avi`, `.mkv`.
 - `control.js` — `strippedname` убирает любое из этих расширений; ссылка скачивает файл (`download`), имя без расширения.
 
-### 🧠 NPU YOLOv5s на видео
-
-**Результат:** **39 FPS**, bounding boxes в реальном времени.
-
-**Что работает:**
-- YOLOv5s обнаруживает объекты (`person`, `tv`, `chair` и т.д.).
-- Отображает bounding boxes с уверенностью.
-- Работает на видео с USB-камеры.
-
-**Скорость:** ~25 мс на кадр.
 
 ### 🎛️ NPU по кнопке без ESP32
 
@@ -951,6 +1165,8 @@ def handle_command():
 ```
 
 **Результат:** Кнопка `OBJECTS` **локально** включает NPU (без ESP32) **и одновременно** отправляет команду в UART (для ESP32).
+- Кнопка OBJECTS → YOLO26s.
+- Кнопка MP POSE → YOLO11_pose (не MediaPipe).
 
 ### 📊 OSD (On-Screen Display)
 
@@ -1015,15 +1231,22 @@ f['fb'][f'base_voltage']:base.base_data['v'] if base.base_data else 0,
 
 ### 📝 Обновления в CSS
 
-**`templates/style.css`:**
+**`templates/style.css`** — актуальный вид (см. также раздел «🌐 Веб-интерфейс»):
 
 ```css
-.video img{
+.video {
     width: 960px;
     height: 540px;
+    overflow: hidden;
+}
+.video img {
+    width: 100%;
+    height: 100%;
     border-radius: 4px;
     object-fit: contain;
 }
+main { width: 1600px; margin: auto; }
+.box1 .section_video { width: 1000px; margin-right: 10px; }
 ```
 ## 🆕 Обновления (2026-10-01)
 
@@ -1037,22 +1260,6 @@ f['fb'][f'base_voltage']:base.base_data['v'] if base.base_data else 0,
 ```bash
 sudo dd if=/dev/mmcblk1 of=/dev/mmcblk0 bs=1M count=20 conv=notrunc
 ```
-### ⚠️ Отключение CQE (баг драйвера sunxi-mmc)
-**Проблема:** драйвер sunxi-mmc на A733 имеет баг с CQE. При HS400 (200 МГц) CQE сбоит при записи, что повреждает загрузчик на eMMC.
-
-**Симптомы:**
-
-```dmesg | grep cqhci → cqhci: Failed to halt, cmd 12, RTO.```
-
-Система не загружается с eMMC после выключения.
-
-**Решение:** снизить частоту eMMC до 52 МГц (HS-режим, без CQE):
-
-```bash
-sudo fdtput -t i /boot/dtb/allwinner/sun60i-a733-orangepi-4-pro.dtb /soc@3000000/sdmmc@4022000 max-frequency 52000000
-```
-**Результат:** dmesg | grep cqhci — ошибки исчезают, eMMC не повреждается.
-
 ### 📏 Расширение eMMC до 29 ГБ
 
 **Проблема:** после ручного копирования раздел eMMC — **7.2 ГБ** (как SD).
@@ -1103,56 +1310,8 @@ def cleanup_handler(signum, frame):
 signal.signal(signal.SIGTERM, cleanup_handler)
 signal.signal(signal.SIGINT, cleanup_handler)
 ```
-### 🎥 VPU-энкодер (H.264, аппаратное кодирование)
-> ⚠️ **Устарело.** Этот путь через FFmpeg+pipe **прерывал живой поток**. Заменён на GStreamer `tee` + `avenc_mjpeg` + `matroskamux` (см. «Запись видео — финальное решение»).
 
-**Дата:** 2026-10-02
-
-**Проблема:** `libvencoder.so` на A733 **не генерирует SPS/PPS** (возвращает филлер `0xFF`). Без SPS/PPS видео **не воспроизводится**.
-
-**Решение:** **обходной путь** через **FFmpeg + GStreamer**:
-- **FFmpeg** захватывает камеру (`/dev/video0`), конвертирует в **NV12**.
-- **Pipe** передаёт данные в **GStreamer**.
-- **GStreamer** использует `omxh264videoenc` (VPU) + `h264parse` + `mp4mux` + `filesink`.
-- **SPS/PPS** генерируются **GStreamer** автоматически.
-
-**Скрипт** `/root/ugv_rpi/vpu_record.sh`:
-```bash
-#!/bin/bash
-OUTPUT="$1"
-DURATION="${2:-0}"
-if [ -z "$OUTPUT" ]; then
-    echo "Usage: $0 <output_file> [duration_seconds]"
-    exit 1
-fi
-ffmpeg -f v4l2 -input_format mjpeg -video_size 1280x720 -i /dev/video0 \
-    -pix_fmt nv12 -f rawvideo -t "$DURATION" - 2>/dev/null | \
-gst-launch-1.0 -e fdsrc blocksize=1382400 ! \
-    videoparse width=1280 height=720 format=nv12 framerate=30/1 ! \
-    omxh264videoenc ! h264parse ! \
-    mp4mux ! filesink location="$OUTPUT" 2>/dev/null
-```
-**Использование:**
-
-```bash
-# Запись 10 секунд
-sudo /root/ugv_rpi/vpu_record.sh /tmp/test.mp4 10
-
-# Проверка
-ffprobe -v error -show_format /tmp/test.mp4
-# format_name=mov,mp4,m4a,3gp,3g2,mj2
-# duration=10.000000
-# size=2623745
-```
-**Результат:** валидный MP4 с H.264 (аппаратное кодирование через VPU).
-
-**Ограничение:** при записи через app.py — поток прерывается (камера освобождается для FFmpeg). 
-**Решение** — Этап 2 (GStreamer для всего).
-
-.........
-
-
-### 📡 GstStream: поток без прерывания (2026-10-02)
+### 📡 GstStream: поток без прерывания
 
 **Проблема:** при записи через `vpu_record.sh` (FFmpeg + GStreamer) **поток** **прерывался** (камера **освобождалась**).
 
@@ -1171,10 +1330,8 @@ ffprobe -v error -show_format /tmp/test.mp4
 
 **Результат:** **поток** **работает** **параллельно** **с** **записью**.
 
-### 🆕 Обновления 
 
-- **2026-10-02:** GStreamer `tee` — запись без прерывания живого потока. Контейнер `.mkv` (matroskamux) — VFR сохранён. `avenc_mjpeg` вместо `jpegenc`. Фикс счётчика FPS (двойной инкремент → один). Лимит `generate_frames` 30 FPS → задержка 0.1 сек, CPU 17%. UI галереи: фильтр `.mp4`/`.avi`/`.mkv`, скачивание вместо открытия в браузере.
-## 🆕 Обновления (2026-10-03)
+- **GStreamer `tee`**  — запись без прерывания живого потока. Контейнер `.mkv` (matroskamux) — VFR сохранён. `avenc_mjpeg` вместо `jpegenc`. Фикс счётчика FPS (двойной инкремент → один). Лимит `generate_frames` 30 FPS → задержка 0.1 сек, CPU 17%. UI галереи: фильтр `.mp4`/`.avi`/`.mkv`, скачивание вместо открытия в браузере.
 
 ### 🎥 Переключение режима камеры (1080p30 ↔ 720p60)
 
@@ -1213,6 +1370,7 @@ ffprobe -v error -show_format /tmp/test.mp4
 - ✅ **FPS в OSD** меняется (30 ↔ 57-60).
 
 ## 🆕 Обновления (2026-10-05): YOLO11s на NPU Allwinner A733 (INT8, 27 FPS)
+> ⚠️ **Не актуально** — заменено на YOLO26s (см. выше). Оставлено как история.
 
 **Итог:** YOLO11s успешно сконвертирована в INT8, собирается и работает на NPU A733 (Orange Pi 4 Pro).
 **Скорость:** ~37 мс на инференс (~27 FPS) + ~5 мс постобработка на CPU.
@@ -1312,238 +1470,722 @@ detection num: 3
 
 ### Что это даёт проекту
 
-- **NPU-детекция** — теперь на **YOLO11s** (быстрее, точнее YOLOv5s).
+- **NPU-детекция** — теперь на **YOLO11s** (быстрее, точнее стандартной собранной модели YOLOv5s в allwinner-model-zoo).
 - **Готовый пайплайн** — можно пересобрать модель под **другие задачи** (pose, seg, depth — есть в `examples/yolo11_pose/`, `yolo11_seg/`, `yolo26_depth/`).
 - **Официальная поддержка** Allwinner — не самодельная конвертация.
 
-## 🆕 Обновления (2026-10-06): YOLO26s + устранение отставания через NPU-сервер
+## 🧠 YOLO26 Depth на NPU (карта глубины) (2026-10-08)
 
-**Итог:** YOLO26s INT8 (PCQ) работает на NPU A733. **Отставание рамок < 0.3 сек** (было ~1 сек). Архитектура — **постоянный C++ NPU-сервер через UNIX-сокет** (вместо `subprocess.run` на каждый кадр).
+**Итог:** модель YOLO26 depth (nano) сконвертирована в NBG, работает на NPU A733. **65 мс** на инференс (~11 FPS) с квантизацией PCQ. Заменяет монокулярную оценку глубины через тяжёлые CPU-модели. Дополняет лидар D500 — depth даёт объём, лидар — точные расстояния в срезе.
+### Что такое YOLO26 depth
 
-### Почему YOLO26s лучше YOLO11s
-
-Три ключевых улучшения:
-1. **DFL-free** (убран Distribution Focal Loss) — голова проще, лучше квантизуется.
-2. **NMS-free** — постобработка ~6 мс вместо ~11 мс.
-3. **ProgLoss + STAL** — лучше детектит мелкие и удалённые объекты.
-
-### Проблема с `subprocess` (решение от 2026-10-05)
-
-Первая версия (YOLO11s) вызывала демо через `subprocess.run()` на каждый кадр:
-- **fork + exec** — ~20-50 мс.
-- **Загрузка `.nb` (6.6 МБ)** с eMMC 52 МГц — ~100-130 мс.
-- **`cv2.imwrite` + `cv2.imread`** — ~20-30 мс.
-- **Итого ~200-300 мс** на цикл → **отставание ~0.7-1 сек**.
-
-### Решение: NPU-сервер через UNIX-сокет
-
-**C++ сервер `npu_server`** (`yolo26/npu_server.cpp`):
-- Загружает модель **ОДИН РАЗ** при старте.
-- Слушает UNIX-сокет `/tmp/npu11.sock`.
-- Принимает JPEG-кадры от Python (4 байта длины BE + JPEG).
-- Декодирует, letterbox 640×640, запускает NPU.
-- Постобработка (`detect_yolo26_6_post`).
-- Возвращает JSON (4 байта длины BE + JSON).
-
-**Python-клиент `npu_client.py`:**
-- Подключается к сокету (с автопереподключением).
-- `detect(frame)` — отправляет JPEG, получает список детекций.
-- Асинхронный воркер `_npu_worker` в `cv_ctrl.py` — крутится в отдельном потоке, обновляет `self.overlay`.
-
-### Результаты YOLO26s vs YOLO11s
-
-| Метрика | YOLO11s | YOLO26s |
-|---|---|---|
-| FPS 1080p30 | 26 | **29** |
-| FPS 720p60 | 57 | **60** |
-| CPU 1080p30 | 39% | **36-38%** |
-| CPU 720p60 | 35% | **36%** |
-| Удалённые объекты | часто терялись | **лучше** |
-| Мигание (статика) | иногда | **нет** |
-| Отставание | <0.3 сек | **<0.3 сек** |
-
-**Температура** — ниже (меньше CPU → меньше тепла).
-
-### Протокол
-
-```
-Клиент -> Сервер: [4 байта BE: длина JPEG] [JPEG bytes]
-Сервер -> Клиент: [4 байта BE: длина JSON] [JSON bytes]
-
-JSON: [{"class_id": 16, "class": "dog", "confidence": 0.92, "bbox": [x0,y0,x1,y1]}, ...]
-```
-
-### Автозапуск
-
-**`/etc/systemd/system/npu-server.service`:**
-```ini
-[Unit]
-Description=NPU Server for YOLO11s (A733)
-After=network.target
-Before=ugv.service
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/root/ugv_rpi/yolo11
-Environment=LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733
-ExecStartPre=/root/ugv_rpi/prepare_shm.sh
-ExecStart=/root/ugv_rpi/yolo11/npu_server /dev/shm/yolo26s_6_pcq_a733.nb
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-```
-
-**`ugv.service`** — `After=network.target npu-server.service` + `Requires=npu-server.service`.
-
-**`prepare_shm.sh`** — копирует YOLO26 модель в `/dev/shm/` (RAM-диск) при старте.
-
-### Пайплайн конвертации YOLO26s (PCQ)
-
-1. **Скачать** `yolo26s.pt` (Ultralytics).
-2. **Экспорт ONNX** (opset 16): `yolo export model=yolo26s.pt format=onnx simplify=True dynamic=False opset=16`.
-3. **Вырезать 6 выходов** через `onnx_extract.py`:
-   - `/model.23/Reshape_output_0` (`[1, 4, 6400]` — bbox, stride 8)
-   - `/model.23/Reshape_1_output_0` (`[1, 4, 1600]`)
-   - `/model.23/Reshape_2_output_0` (`[1, 4, 400]`)
-   - `/model.23/Reshape_3_output_0` (`[1, 80, 6400]` — classes)
-   - `/model.23/Reshape_4_output_0` (`[1, 80, 1600]`)
-   - `/model.23/Reshape_5_output_0` (`[1, 80, 400]`)
-4. **Docker ACUITY** (`ubuntu-npu:v2.0.10.2`):
-   - `./pegasus_import.sh yolo26s_6`
-   - `./pegasus_quantize.sh yolo26s_6 pcq 12` ← **PCQ**, не uint8.
-   - `./pegasus_export_ovx_nbg.sh yolo26s_6 pcq a733`
-5. **Результат:** `yolo26s_6_pcq_a733.nb` (9 МБ).
-
-### Нативная сборка NPU-сервера на Orange Pi
-
-```bash
-cd /root/ugv_rpi/yolo26/
-./build_native.sh
-```
-
-**Ключевые фиксы `CMakeLists.txt.patched`:**
-1. `SYS_ARCH=linux_aarch64` — принудительно.
-2. OpenCV через `pkg-config` — не `find_package`.
-3. Убрать `_GLIBCXX_USE_CXX11_ABI=0` — иначе конфликт с системным OpenCV 4.10.
-4. `MODEL_ZOO_HOME_DIR` — абсолютный путь.
-5. `static` у `detect_yolo26_6_post` — убран (для экспорта).
-6. Исключить `yolo11_6_*.cpp` из сборки (конфликтуют с YOLO26).
-7. `main.cpp` — исключён из `npu_server` (у него свой `main`).
-
-### Файлы в репозитории
-
-- `yolo26/` — папка YOLO26s (модель, сервер, скрипты, README).
-- `yolo11/` — папка YOLO11s (остаётся как история).
-- `npu_client.py` — Python-клиент (общий для YOLO11/YOLO26).
-- `prepare_shm.sh` — копирование `.nb` в RAM.
-- `/etc/systemd/system/npu-server.service` — автозапуск.
-
-## 🆕 Обновления (2026-10-06): YOLO11_pose на NPU — скелет в реальном времени
-
-**Итог:** YOLO11_pose работает на NPU A733 через **второй NPU-сервер** (`npu_pose_server`, сокет `/tmp/npu_pose.sock`). **Заменяет MediaPipe Pose** (который не работает на A733). Кнопка **MP POSE** в веб-интерфейсе теперь использует **NPU-инференс**.
-
-### Что нового
-
-1. **YOLO11_pose INT8 (uint8)** сконвертирована в `.nb` (7 МБ).
-2. **Второй NPU-сервер** — `npu_pose_server` (по аналогии с YOLO26).
-3. **Python-клиент** — `npu_pose_client.py` (подключается к `/tmp/npu_pose.sock`).
-4. **Асинхронный pose-воркер** в `cv_ctrl.py` — `_npu_pose_worker`.
-5. **Отрисовка скелета** — 17 keypoints + 19 соединений (COCO skeleton).
-6. **Автозапуск** — `npu-pose-server.service`.
-
-### Архитектура
-
-```
-Клиент (cv_ctrl.py)          Сервер (npu_pose_server)
-        |                              |
-        |--- JPEG (4 байта + данные) ->|
-        |                              | decode + letterbox 640×640
-        |                              | NPU inference (YOLO11_pose)
-        |                              | detect_yolo11_pose_9_post
-        |<- JSON (4 байта + данные) ---|
-        |                              |
-   рисуем bbox + скелет                |
-```
-
-**Сокеты:**
-- `/tmp/npu11.sock` — YOLO26s (детекция объектов).
-- `/tmp/npu_pose.sock` — YOLO11_pose (17 keypoints).
-
-**Оба сервера работают параллельно**, переключение — **мгновенное** (без subprocess).
-
-### Модель
-
-- **9 выходов**: bbox (cv2) + class (cv3) + keypoints (cv4) × 3 уровня (80×80, 40×40, 20×20).
-- **1 класс** — person.
-- **17 keypoints** COCO: нос, глаза, уши, плечи, локти, запястья, бёдра, колени, лодыжки.
-- **Detection time**: ~62 мс.
-- **FPS**: ~28 (с отрисовкой скелета).
-- **CPU**: минимальная нагрузка.
-
+Монокулярная оценка глубины по **одному RGB-кадру**. Выход — **карта глубины** (heatmap) 768×768, значения в метрах. Позволяет:
+- видеть препятствия выше/ниже среза лидара,
+- дополнять SLAM (стекло, прозрачные поверхности),
+- давать роботу «объёмное» зрение для объезда.
 ### Пайплайн конвертации
 
-1. **`yolo11s-pose.pt`** (Ultralytics) → ONNX (opset 15).
-2. **`onnx_extract.py`** — вырезать 9 выходов (cv2/cv3/cv4 × 3 уровня).
-3. **Docker ACUITY** (`ubuntu-npu:v2.0.10.2`):
-   - `./pegasus_import.sh yolo11s-pose_9`
-   - `./pegasus_quantize.sh yolo11s-pose_9 uint8 12`
-   - `./pegasus_export_ovx_nbg.sh yolo11s-pose_9 uint8 a733`
-4. **Результат:** `yolo11s-pose_9_uint8_a733.nb` (7 МБ).
+1. **Скачать** `yolo26n-depth.pt` (Ultralytics, 12.4 МБ) или `yolo26s-depth.pt` (s-версия).
+2. **Экспорт ONNX** через Ultralytics (venv в VirtualBox):
+   - nano: `imgsz=768, opset=14, simplify=True`.
+   - результат: `yolo26n-depth.onnx` (~20 МБ).
+3. **Docker ACUITY** (`ubuntu-npu:v2.0.10.2`, Model Zoo v1.1.0):
+   - `./pegasus_import.sh yolo26n-depth`
+   - `./pegasus_quantize.sh yolo26n-depth pcq 10` ← **PCQ (INT8)**, не int16.
+   - `./pegasus_export_ovx_nbg.sh yolo26n-depth pcq a733`
+4. **Результат:** `yolo26n-depth_pcq_a733.nb` (10.4 МБ).
 
+**Важно:** `config_yml.py` из `examples/yolo26_depth/convert_model/` универсальный — mean=[0,0,0], scale=[1/255,1/255,1/255], IMAGE_RGB. Для nano и s-версии — одинаковые параметры (обе обучались на NYU Depth V2).
+### Сравнение вариантов (тесты на `rgb_00285.jpg`, A733)
+
+| Модель | Квантизация | Размер .nb | Run time | FPS | Качество |
+|---|---|---|---|---|---|
+| **yolo26s-depth** | int16 | 21.3 МБ | 244 мс | 4.1 | 🟢 высокое |
+| **yolo26n-depth** | int16 | 9.7 МБ | 158 мс | 5.3 | 🟢 приемлемое |
+| **yolo26n-depth** | **PCQ** | **10.4 МБ** | **65 мс** | **~11** | 🟢 **приемлемое** |
+| yolo26s-depth | PCQ | — | — | — | 🔴 шумное (отпадает) |
+
+**Ключевой вывод:** nano + PCQ — **лучший баланс** (65 мс, ~11 FPS, приемлемое качество). s + PCQ даёт шум из-за `Exp()` в конце модели (INT8 усиливает ошибку экспоненциально).
+### Почему PCQ для nano работает, а для s — нет
+
+YOLO26-depth имеет **`Exp()` на выходе** — малейшая ошибка в log-глубине экспоненциально усиливается при INT8-квантизации.
+- **s-модель** (больше параметров) накапливает больше ошибок → PCQ шумит.
+- **n-модель** (меньше параметров) — квантуется лучше → PCQ даёт приемлемое качество.
+
+**Отсюда:** int16 для точности (медленно), PCQ для скорости (для nano — с приемлемым качеством).
+### Стратегия использования
+
+**Основной режим:** `yolo26n-depth_pcq_a733.nb` — 65 мс, ~11 FPS.
+
+**Резерв (если понадобится точность):**
+- `yolo26n-depth_int16_a733.nb` — 158 мс, запас.
+- `yolo26s-depth_int16_a733.nb` — 244 мс, для редкого уточнения.
+
+**Не использовать:** `yolo26s-depth_pcq` — шумно.
+
+**Комбо-режим (резерв на будущее):** nano-PCQ постоянно + s-int16 раз в 1-2 сек для уточнения. Если реальные испытания покажут, что одного nano не хватает — включим.
+### Демо на Orange Pi
+
+```bash
+cd /root/ugv_rpi/yolo26_depth/
+
+LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733 \
+./yolo26_depth_demo \
+  -nb model/yolo26n-depth_pcq_a733.nb \
+  -i model/rgb_00285.jpg \
+  -l 1 -m 10
+```
+**Вывод:**
+```text
+input  0 dim 3 768 768 1
+output 0 dim 768 768 1 1
+create network 0: 10405 us
+prepare network: 5349 us
+run time for this network 0: 65368 us  ← 65 мс
+depth postprocess time: 3.33 ms
+saved heatmap: output_depth_heatmap.jpg
+```
 ### Нативная сборка
 
 ```bash
-cd /root/ugv_rpi/yolo11_pose/
+cd /root/ugv_rpi/yolo26_depth/
 ./build_native.sh
 ```
-
-**Ключевые фиксы** (аналогично YOLO26):
-1. `SYS_ARCH=linux_aarch64`.
-2. OpenCV через `pkg-config`.
+**Ключевые фиксы:**
+1. `SYS_ARCH=linux_aarch64` — принудительно.
+2. OpenCV через `pkg-config opencv4` — не `find_package`.
 3. Убрать `_GLIBCXX_USE_CXX11_ABI=0`.
 4. `MODEL_ZOO_HOME_DIR` — абсолютный путь.
-5. Исключить `main.cpp`, `npu_server.cpp`, `npu_pose_server.cpp`, `yolo11_6_*.cpp` из сборки.
-6. Собирать только `npu_pose_server`.
+5. Собирать только `yolo26_depth_demo` из 3 файлов (`main.cpp`, `yolo26_depth_pre.cpp`, `yolo26_depth_post.cpp`).
+6. `build_native.sh` — собирает в своей папке (не копирует в Model Zoo).
+### Файлы в репозитории
 
-### Автозапуск
+- `yolo26_depth/main.cpp` — демо.
+- `yolo26_depth/yolo26_depth_pre.cpp` — letterbox 768×768.
+- `yolo26_depth/yolo26_depth_post.cpp` — heatmap + JET colormap.
+- `yolo26_depth/model_config.h` — INPUT=768, OUTPUT=768.
+- `yolo26_depth/CMakeLists.txt.patched` — нативная сборка.
+- `yolo26_depth/build_native.sh` — скрипт сборки.
+- `yolo26_depth/model/yolo26n-depth_pcq_a733.nb` — рабочая модель.
+- `yolo26_depth/model/yolo26n-depth_int16_a733.nb` — запас.
+- `yolo26_depth/model/yolo26s-depth_int16_a733.nb` — точная (редко).
+- `yolo26_depth/model/rgb_00285.jpg` — тестовое изображение.
 
-**`/etc/systemd/system/npu-pose-server.service`:**
-```ini
-[Unit]
-Description=NPU Pose Server for YOLO11_pose (A733)
-After=network.target
-Before=ugv.service
+**🚧 Что дальше:**
+- [ ] Комбо-режим (nano-PCQ + s-int16) — если понадобится.
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/root/ugv_rpi/yolo11_pose
-Environment=LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733
-ExecStartPre=/bin/sh -c 'cp /root/ugv_rpi/yolo11_pose/yolo11s-pose_9_uint8_a733.nb /dev/shm/ 2>/dev/null || true'
-ExecStart=/root/ugv_rpi/yolo11_pose/npu_pose_server /dev/shm/yolo11s-pose_9_uint8_a733.nb
-Restart=always
-RestartSec=3
 
-[Install]
-WantedBy=multi-user.target
+## 🎨 YOLO11 Segmentation на NPU (маски объектов)
+
+**Итог:** модель YOLO11s-seg сконвертирована в NBG, работает на NPU A733. **45 мс** на инференс (~22 FPS) с квантизацией uint8. Выделяет пиксельные маски каждого объекта (instance segmentation).
+### Что такое YOLO11-seg
+
+**Instance segmentation** — модель не просто рисует рамку, а **выделяет пиксели каждого объекта** (маска-полигон). Для каждого найденного объекта — контур.
+
+**Зачем нам:**
+- Точные границы объектов (не «где-то тут человек», а «вот эти пиксели»).
+- Форма объекта (площадь, ориентация).
+- Для демонстраций — красиво и наглядно.
+- Для взаимодействия — знать, где именно объект.
+### Пайплайн конвертации
+
+1. **Скачать** `yolo11s-seg_10.onnx` (Allwinner, 40 МБ) — **уже обрезанный через `onnx_extract.py`** (10 выходов: bbox + class + mask coeffs + protos × 3 уровня + protos).
+2. **Docker ACUITY** (`ubuntu-npu:v2.0.10.2`, Model Zoo v1.1.0):
+   - `./pegasus_import.sh yolo11s-seg_10`
+   - `./pegasus_quantize.sh yolo11s-seg_10 uint8 12` ← **uint8**, не int16/pcq.
+   - `./pegasus_export_ovx_nbg.sh yolo11s-seg_10 uint8 a733`
+3. **Результат:** `yolo11s-seg_10_uint8_a733.nb` (7.3 МБ).
+
+**Важно:** в README Allwinner указано, что **постобработка seg при 8bit даёт потери точности**, поэтому её вынесли на CPU (C++). Это и есть смысл обрезки через `onnx_extract.py`.
+### Результаты теста (dog.jpg)
+```
+| Метрика | Значение |
+|---|---|
+| **run time (inference)** | **45.2 мс** (~22 FPS) |
+| **post process** | 11 мс |
+| **Размер .nb** | 7.3 МБ |
 ```
 
-### Интеграция с роботом
+**Детекции:**
 
-- **Кнопка MP POSE** (T=10309) → `set_cv_mode(mp_pose)` → **запуск pose-воркера**.
-- **Переключение OBJECTS ↔ MP POSE** — **мгновенное**.
-- **Отрисовка:** bbox + label + 17 keypoints (красные кружки) + 19 соединений (жёлтые линии).
-- **Фильтр по confidence** — keypoints с `prob > 0.3`.
+```
+detection num: 3
+1: 95%, [ 127, 125, 568, 420], bicycle
+16: 96%, [ 132, 221, 311, 541], dog
+2: 85%, [ 466, 75, 691, 172], car
+```
+```text
+**Качество:** маски чёткие, объекты выделены точно. Заметно лучше, чем PCQ у depth (у seg нет `exp()` на выходе — квантизация не убивает точность).
+```
+### Сравнение со всеми моделями проекта
+
+| Модель | Квантизация | Run time | FPS | Качество |
+|---|---|---|---|---|
+| YOLO26s (детекция) | PCQ | ~35 мс | 29 | 🟢 |
+| YOLO11_pose | uint8 | ~62 мс | 16 | 🟢 |
+| **YOLO11_seg** | **uint8** | **45 мс** | **~22** | 🟢 |
+| YOLO26n_depth | PCQ | 65 мс | ~11 | 🟢 |
+
+Seg работает **быстрее**, чем pose и depth — почти как детекция.
+
+### Демо на Orange Pi
+
+```bash
+cd /root/ugv_rpi/yolo11_seg/
+
+LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733 \
+./yolo11_seg_demo \
+  -nb model/yolo11s-seg_10_uint8_a733.nb \
+  -i model/dog.jpg \
+  -l 1 -m 10
+```
+```text
+input  0 dim 3 640 640 1
+output 0 dim 80 80 64 1   (bbox)
+output 1 dim 80 80 80 1   (class)
+output 2 dim 80 80 32 1   (mask coeffs)
+...
+output 9 dim 160 160 32 1 (protos)
+run time for this network 0: 45220 us  ← 45 мс
+post process time : 11 ms
+detection num: 3
+```
+### Нативная сборка
+
+```bash
+cd /root/ugv_rpi/yolo11_seg/
+./build_native.sh
+```
+**Ключевые фиксы:**
+1. `SYS_ARCH=linux_aarch64` — принудительно.
+2. OpenCV через `pkg-config opencv4`.
+3. Убрать `_GLIBCXX_USE_CXX11_ABI=0`.
+4. `MODEL_ZOO_HOME_DIR` — абсолютный путь.
+5. Собирать только `yolo11_seg_demo` из 3 файлов (`main.cpp`, `yolo11_seg_10_pre.cpp`, `yolo11_seg_10_post.cpp`).
+6. `build_native.sh` — собирает в своей папке.
 
 ### Файлы в репозитории
 
-- `yolo11_pose/` — папка YOLO11_pose (модель, сервер, скрипты, README).
-- `npu_pose_client.py` — Python-клиент (в корне репозитория).
-- `/etc/systemd/system/npu-pose-server.service` — автозапуск.
+- `yolo11_seg/main.cpp` — демо.
+- `yolo11_seg/yolo11_seg_10_pre.cpp` — letterbox 640×640.
+- `yolo11_seg/yolo11_seg_10_post.cpp` — маски + bbox.
+- `yolo11_seg/model_config.h` — INPUT=640, 10 выходов.
+- `yolo11_seg/CMakeLists.txt.patched` — нативная сборка.
+- `yolo11_seg/build_native.sh` — скрипт сборки.
+- `yolo11_seg/model/yolo11s-seg_10_uint8_a733.nb` — модель.
+- `yolo11_seg/model/dog.jpg` — тестовое изображение.
 
+## 🎛️ NPU-сервисы (4 одновременно)
+
+В проекте работают **4 NPU-сервера** через UNIX-сокеты. Все запускаются автоматически при старте системы.
+| Сервис | Модель | Сокет | Время |
+|---|---|---|---|
+| `npu-server.service` | YOLO26s (детекция) | `/tmp/npu11.sock` | ~35 мс |
+| `npu-pose-server.service` | YOLO11_pose (позы) | `/tmp/npu_pose.sock` | ~62 мс |
+| `npu-seg-server.service` | YOLO11_seg (маски) | `/tmp/npu_seg.sock` | ~45 мс |
+| `npu-depth-server.service` | YOLO26n_depth (глубина) | `/tmp/npu_depth.sock` | ~65 мс |
+**Python-клиенты (в корне репозитория):**
+- `npu_client.py` — YOLO26s.
+- `npu_pose_client.py` — YOLO11_pose.
+- `npu_seg_client.py` — YOLO11_seg.
+- `npu_depth_client.py` — YOLO26n_depth.
+
+**Особенности:**
+- Все 4 сервиса работают параллельно — NPU справляется.
+- Переключение между режимами в вебе — мгновенное ~ 0.2 сек (без subprocess).
+- Модели копируются в `/dev/shm` (RAM-диск) через `ExecStartPre`.
+
+## 🎛️ Кнопки CV в веб-интерфейсе
+
+| Кнопка | Режим | Что делает |
+|---|---|---|
+| **OBJECTS** | YOLO26s | Детекция объектов (bbox + класс + confidence) |
+| **DEPTH** | YOLO26n_depth | Карта глубины (16×16 сетка + красная подсветка близких пикселей) |
+| **SEG** | YOLO11_seg | Маски объектов (RLE-сжатие) |
+| **COLOR** | OpenCV | Трекинг цвета |
+| **HAND GS** | MediaPipe | Жесты (не работает без MediaPipe) |
+| **MP FACE** | MediaPipe | Лица (не работает без MediaPipe) |
+| **MP POSE** | YOLO11_pose | Скелет (17 keypoints, COCO) |
+| **None** (Simple Detection Type) | — | Отключить CV |
+
+**Расположение в интерфейсе:**
+- **Advance CV Funcs** — OBJECTS, COLOR, HAND GS (3 кнопки).
+- **NPU Depth/Seg** — DEPTH, SEG (2 кнопки).
+- **MediaPipe Funcs** — MP FACE, MP POSE.
+
+**Подсветка активной кнопки:** автоматически через Socket.IO (событие `update`).
+
+
+## 💾 NVMe SSD + SPI Flash (2026-10-09)
+
+**Итог:** система **загружается с NVMe** (570 МБ/с) **без eMMC и без SD-карты**. U-Boot прошит в **SPI Flash** с патчем питания (`dc1sw1`). eMMC — **бэкап** (лежит на полке).
+### Что сделано
+
+1. **SPI Flash прошит** — U-Boot с патчем `pcie3v3_supply = "dc1sw1"` (вместо `dc1sw2`).
+2. **Система перенесена на NVMe** — `rsync` + правка `armbianEnv.txt` (UUID NVMe) + `/etc/fstab`.
+3. **NVMe работает на Gen3** — 8.0 GT/s PCIe, **570 МБ/с** (было 205 МБ/с на eMMC).
+4. **eMMC вынута** — загрузка идёт **SPI → NVMe**.
+### Порядок загрузки
+```text
+BootROM: SD → eMMC → SPI → USB
+U-Boot (boot_targets): SD → eMMC → NVMe → USB
+```
+### Причина, почему U-Boot не видел NVMe
+
+**Питание M.2 слота.** U-Boot включал **не тот ключ** 3.3 В: `dc1sw2` вместо `dc1sw1`. Слот был **обесточен** → PCIe-линк **не тренировался** → NVMe **не определялся**.
+
+**Linux не замечал** — ядро помечает **оба** ключа (`dc1sw1`, `dc1sw2`) как `regulator-always-on`, поэтому включает **оба**. NVMe «оживал» при загрузке ядра — и казалось, что нужна SD-карта.
+
+**Патч:** `pcie3v3_supply = "dc1sw1"` (в `board-uboot.dts`).
+### Как повторить
+
+**1. Сборка U-Boot с патчем (VirtualBox):**
+```bash
+cd ~/orangepi-build
+git clone https://github.com/TblP/orangepi-uboot-fix.git /tmp/uboot-fix
+mkdir -p userpatches/u-boot/u-boot-sunxi/
+cp /tmp/uboot-fix/patches/0001-orangepi4pro-pcie-3v3-dc1sw1.patch userpatches/u-boot/u-boot-sunxi/
+sudo ./build.sh BOARD=orangepi4pro BRANCH=current RELEASE=jammy BUILD_OPT=u-boot KERNEL_CONFIGURE=no CLEAN_LEVEL=make
+```
+**2. Установка на Orange Pi:**
+```bash
+sudo dpkg -r linux-u-boot-orangepi4pro-vendor
+sudo dpkg -i linux-u-boot-current-orangepi4pro_1.1.0_arm64.deb
+sudo dpkg -r linux-u-boot-orangepi4pro-vendor
+sudo dpkg -i linux-u-boot-current-orangepi4pro_1.1.0_arm64.deb
+```
+**3. Прошивка SPI:**
+```bash
+sudo dd if=/dev/mtd0 of=/root/spi_backup_$(date +%Y%m%d_%H%M%S).bin bs=1M count=16
+sudo flash_erase /dev/mtd0 0 50
+sudo mtd_debug write /dev/mtd0 0 $(stat --format="%s" /usr/lib/linux-u-boot-current-orangepi4pro_1.1.0_arm64/boot0_spinor_a733.fex) /usr/lib/linux-u-boot-current-orangepi4pro_1.1.0_arm64/boot0_spinor_a733.fex
+sudo mtd_debug write /dev/mtd0 262144 $(stat --format="%s" /usr/lib/linux-u-boot-current-orangepi4pro_1.1.0_arm64/boot_package.fex) /usr/lib/linux-u-boot-current-orangepi4pro_1.1.0_arm64/boot_package.fex
+sudo sync
+```
+**4. Перенос системы на NVMe:**
+```bash
+sudo parted /dev/nvme0n1 mklabel gpt
+sudo parted /dev/nvme0n1 mkpart primary ext4 0% 100%
+sudo mkfs.ext4 -F /dev/nvme0n1p1
+sudo mkdir -p /mnt/nvme && sudo mount /dev/nvme0n1p1 /mnt/nvme
+sudo rsync -aAXHv --exclude={/dev/*,/proc/*,/sys/*,/tmp/*,/run/*,/mnt/*,/media/*,/lost+found} / /mnt/nvme/
+sudo sed -i 's|^rootdev=.*|rootdev=UUID=<UUID_NVME> rootdelay=5|' /mnt/nvme/boot/armbianEnv.txt
+sudo sed -i 's|<UUID_EMMC>|<UUID_NVME>|g' /mnt/nvme/etc/fstab
+sudo sync && sudo umount /mnt/nvme
+```
+**5. Выключить, вынуть eMMC, включить.**
+### Результат
+```text
+$ findmnt -no SOURCE,UUID /
+/dev/nvme0n1p1 e4384603-9cf2-4342-ba68-bb64e3e921e4
+
+$ cat /sys/bus/pci/devices/0000:01:00.0/current_link_speed
+8.0 GT/s PCIe
+
+$ df -h /
+/dev/nvme0n1p1 117G 11G 101G 10% /
+```
+**Скорость:** 570 МБ/с (NVMe Gen3 x1) vs 205 МБ/с (eMMC).
+
+## 🎯 ArUco-маркеры (2026-10-09 — 2026-10-10)
+
+**Итог:** детекция ArUco-маркеров через OpenCV (CPU). После **полной калибровки** камеры по шахматной доске — точность **±1 см на 1.35 м** (~0.7%). Кнопка **ARUCO** в веб-интерфейсе.
+
+### Что такое ArUco
+
+**ArUco-маркер** — квадратный чёрно-белый код. Камера видит маркер, OpenCV вычисляет **позицию** (X, Y, Z в метрах) и **ориентацию** (углы). Используется для **точной парковки** и **навигации**.
+
+**Преимущества:**
+- Точность **±2 см** на 1.35 м.
+- Работает **на CPU** (не грузит NPU).
+- **15 FPS** при 1080p.
+- Дёшево (нужна только бумага + принтер).
+### Параметры
+
+| Параметр | Значение |
+|---|---|
+| **Словарь** | `DICT_4X4_50` |
+| **Размер маркера** | 14.6 см (чёрный квадрат) |
+| **Разрешённые ID** | 0, 1, 2, 3 |
+| **Разрешение** | 1280×720 |
+| **Калибровка** | `camera_calib.npz` (RMS=0.3475) |
+| **Точность** | **±1 см на 1.35 м (~0.7%)** |
+| **FPS** | 15 (при 720p) |
+### Файлы
+
+- `aruco_client.py` — клиент (детекция + поза + отрисовка).
+- `aruco_detect.py` — демо-скрипт (синтетика + камера).
+- `aruco_marker_0..3.png` — сгенерированные маркеры (14.6 см).
+
+### Использование
+
+
+
+**1. Сгенерировать маркеры:**
+```bash
+python3 -c "
+import cv2, cv2.aruco as aruco
+d = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
+for i in range(4):
+    img = aruco.generateImageMarker(d, i, 400)
+    img = cv2.copyMakeBorder(img, 40, 40, 40, 40, cv2.BORDER_CONSTANT, value=255)
+    cv2.imwrite(f'aruco_marker_{i}.png', img)
+"
+```
+**2. Напечатать** (или показать на телефоне). **Измерить** размер чёрного квадрата (14.6 см). Приклеить на плоскую поверхность.
+**3. Калибровка камеры:**
+```bash
+python3 camera_calibrate_v2.py
+```
+Собрать 25 кадров с шахматной доской (5×8 внутренних углов, 30 мм). Результат: `camera_calib.npz` (RMS=0.3475).
+
+**4. В веб-интерфейсе** — нажать **ARUCO** → показать маркер камере.
+### Калибровка камеры
+
+**Проблема:** `camera_matrix` без калибровки даёт ошибку **+23%**.
+
+**Решение:** полная калибровка по шахматной доске.
+
+**Шахматная доска:**
+- **Внутренние углы:** 5×8.
+- **Квадраты:** 30 мм.
+- **Распечатать** (PDF от calib.io), **приклеить** на плоскую поверхность.
+
+**Процесс:**
+```bash
+python3 camera_calibrate_v2.py
+```
+- **25 кадров** с доской (разные расстояния/положения/наклоны).
+- **RMS reprojection error: 0.3475** (отлично <0.5).
+- **Средняя ошибка: 0.0512 px.**
+
+
+**Результат:**
+- **До:** ошибка +2.6% (приблизительная калибровка).
+- **После:** ошибка **±0.7%** (полная калибровка).
+
+**Файл:** `camera_calib.npz` (загружается в `aruco_client.py`).
+
+
+### Интеграция в веб
+
+- **`config.yaml`:** `cv_aruco: 10312`.
+- **`app.py`:** `cmd_actions` для `T=10312`.
+- **`cv_ctrl.py`:** воркер `_aruco_worker`, `set_cv_mode`, `cv_mode_list`.
+- **`templates/index.html`:** кнопка **ARUCO** в блоке **NPU Depth/Seg**.
+- **`templates/control.js`:** `sendCmdAruco()`, `DSButtons[2]`, подсветка активной кнопки.
+
+**Переключение:** ARUCO → воркер стартует; None → воркер останавливается. **Мгновенно.**
+
+## 📊 Стресс-тест NPU-моделей (2026-10-10)
+
+**Цель:** замерить **реальные** FPS, CPU, TEMP **под нагрузкой** (4 NPU-модели, реальный видеопоток, 70 сек на модель).
+### Условия
+
+- **Камера:** UGREEN (USB 2.0), **720p60**.
+- **Модели:** YOLO26s (детекция), YOLO11_pose, YOLO11_seg, YOLO26n_depth.
+- **Длительность:** 70 сек на модель (по очереди) + 70 сек (все 4 параллельно).
+- **Мониторинг:** CPU/RAM/TEMP каждые 2 сек.
+### Результаты (720p60)
+
+**По очереди (70 сек на модель):**
+
+| Модель | avg | FPS | Кадров | Ошибок |
+|---|---|---|---|---|
+| **YOLO26s** | 90.9 мс | **11.0** | 640 | 0 |
+| **YOLO11_pose** | 83.7 мс | **12.0** | 714 | 0 |
+| **YOLO11_seg** | 113.8 мс | **8.8** | 550 | 0 |
+| **YOLO26n_depth** | 117.3 мс | **8.5** | 526 | 0 |
+
+**Параллельно (все 4):**
+
+| Метрика | Значение |
+|---|---|
+| **Общий FPS камеры** | **15.0** |
+| **Каждая модель** | **5.6 FPS** (177 мс) |
+| **Всего кадров** | 1051 |
+
+### Системная нагрузка
+
+| Метрика | avg | max | min |
+|---|---|---|---|
+| **CPU (по очереди)** | 11-13% | — | — |
+| **CPU (параллельно)** | 16.4% | **100%** (мгновенно) | — |
+| **RAM** | 5.0% | 5.1% | — |
+| **TEMP** | 32.7 °C | **36.0 °C** | 30.6 °C |
+
+### Распределение по ядрам (btop)
+
+**Orange Pi 4 Pro (A733):** 2× Cortex-A76 (C2, C4 — быстрые) + 6× Cortex-A55 (C0, C1, C3, C5-C7).
+
+- **По очереди:** нагрузка на **C2 и C4** (~32% каждое), остальные — ~5%. NPU-драйвер привязан к **большим** ядрам.
+- **Параллельно:** нагрузка **равномерно** по всем ядрам (~24-38%). NPU-драйвер распределяет задачи.
+
+### Сравнение 720p60 vs 1080p30
+
+| Модель | 1080p30 | 720p60 | Прирост |
+|---|---|---|---|
+| **YOLO26s** | 8.3 FPS | **11.0** | +32% |
+| **YOLO11_pose** | 8.8 FPS | **12.0** | +36% |
+| **YOLO11_seg** | 7.4 FPS | **8.8** | +19% |
+| **YOLO26n_depth** | 6.9 FPS | **8.5** | +23% |
+
+**Почему:** 720p → меньше кадр → быстрее JPEG-кодирование + меньше CPU на декодирование. NPU **не зависит** от размера кадра (ресайзит до 640×640 / 768×768).
+
+### Выводы
+
+1. **CPU — 16.4% avg, 41.7% max** (параллельно). **Запас огромный.**
+2. **TEMP — 36 °C max.** Платформа **холодная**.
+3. **RAM — 5.1%.** Смешно (12 ГБ).
+4. **720p60 — оптимальный** режим (быстрее на 20-36%).
+5. **4 модели параллельно:** 5.6 FPS каждая. **По очереди:** 8.5-12 FPS.
+6. **NPU-драйвер** использует **C2, C4** (Cortex-A76) в **приоритете**.
+
+### Фиксация фокуса камеры (2026-10-10)
+
+**Проблема:** автофокус UGREEN «дышит» (меняет фокус), из-за чего видео размывается и ArUco теряет маркер.
+**Решение:** отключить автофокус и зафиксировать `focus_absolute`.
+
+**Проверка контролей:**
+```bash
+v4l2-ctl -d /dev/video0 --list-ctrls | grep -i focus
+```
+**Вывод:**
+```
+focus_absolute 0x009a090a (int) : min=0 max=1023 step=1 default=512 value=671
+focus_automatic_continuous 0x009a090c (bool) : default=1 value=1
+```
+**Установка:**
+```bash
+sudo v4l2-ctl -d /dev/video0 -c focus_automatic_continuous=0
+sudo v4l2-ctl -d /dev/video0 -c focus_absolute=671
+```
+**Автоматизация (ugv.service):**
+```ini
+ExecStartPre=/root/ugv_rpi/prepare_shm.sh
+ExecStartPre=/bin/sh -c "v4l2-ctl -d /dev/video0 -c focus_automatic_continuous=0 && v4l2-ctl -d /dev/video0 -c focus_absolute=671"
+ExecStart=/root/ugv_rpi/ugv-env/bin/python /root/ugv_rpi/app.py
+```
+**Результат:**
+
+Автофокус **выключен.**
+
+**Фокус зафиксирован на 671** (оптимально для ArUco на 20-100 см).
+
+Видео не **«дышит»**, ArUco **стабильнее.**
+
+## ⚡ RAW BGR для NPU-серверов (2026-10-10)
+
+**Итог:** все 4 NPU-сервера переведены с **JPEG** на **RAW BGR**. Прирост FPS — **от 16% до 57%**. CPU max упал с 100% до 26%.
+
+### Архитектура RAW BGR
+
+**Раньше (JPEG):**
+Python (cv2.imencode JPEG 85%) -> UNIX-сокет -> C++ (cv::imdecode) -> NPU
+
+**Сейчас (RAW):**
+Python (frame.tobytes()) -> UNIX-сокет -> C++ (cv::Mat из raw) -> NPU
+
+**Протокол:**
+Клиент -> Сервер: [4 байта BE: width] [4 байта BE: height] [4 байта BE: channels=3] [raw BGR bytes]
+Сервер -> Клиент: [4 байта BE: длина JSON] [JSON bytes]
+
+**Ключевое:**
+- Нет JPEG-кодирования (-10-20 мс).
+- Нет JPEG-декодирования (-5-10 мс).
+- Размер кадра: 2.7 МБ (1280x720) или 6.2 МБ (1920x1080) — передаётся по UNIX-сокету (~10 ГБ/с).
+- NPU видит более чистое изображение -> детекция стабильнее (меньше мигания).
+
+### Сравнительная таблица: JPEG vs RAW
+
+**Тест 1: По очереди (70 сек на модель, 720p60)**
+
+| Модель | JPEG (avg / FPS) | RAW (avg / FPS) | Прирост FPS |
+|---|---|---|---|
+| **YOLO26s (objects)** | 90.9 мс / 11.0 | **67.3 мс / 14.9** | **+35%** |
+| **YOLO11_pose** | 83.7 мс / 12.0 | **53.3 мс / 18.8** | **+57%** |
+| **YOLO11_seg** | 113.8 мс / 8.8 | **90.0 мс / 11.1** | **+26%** |
+| **YOLO26n_depth** | 117.3 мс / 8.5 | **94.4 мс / 10.6** | **+25%** |
+
+**Средний прирост:** ~35%.
+
+**Тест 2: Параллельно (70 сек, все 4 модели)**
+
+| Метрика | JPEG | RAW | Изменение |
+|---|---|---|---|
+| **Общий FPS камеры** | 15.0 | **12.5** | -17% |
+| **FPS каждой модели** | 5.4 | **5.5** | +2% |
+| **CPU avg** | 16.4% | **14.3%** | -13% |
+| **CPU max** | **100%** | **26.4%** | **-74%** |
+| **TEMP max** | 36.0 °C | 36.3 °C | ~то же |
+
+**Вывод:** в параллельном режиме RAW немного медленнее по кадрам камеры (из-за GIL), но CPU стабильнее (нет пиков до 100%).
+
+### GIL — узкое место параллельного RAW
+
+**Проблема:** в параллельном тесте RAW даёт 12.5 FPS (JPEG — 15.0). Причина — GIL (Global Interpreter Lock) в Python.
+
+**Что происходит:**
+- 4 NPU-клиента работают в потоках одного Python-процесса.
+- GIL не даёт потокам работать параллельно — они сериализуются.
+- RAW кадр — 2.7 МБ (vs JPEG ~100-300 КБ). Копирование больших буферов в Python тратит больше времени под GIL.
+- Итог: камера успевает выдать 12.5 кадров/с вместо 15.0.
+
+**Решение (на будущее):**
+- `multiprocessing` — каждый клиент в своём процессе (GIL не мешает).
+- Или — C++ процесс-раскидыватель: Python шлёт кадр один раз в C++, C++ раскидывает по 4 серверам.
+- Или — гибрид: RAW для OBJECTS (постоянно), JPEG для остальных (по требованию).
+
+**Для робота:** в поочерёдном режиме (навигация) RAW даёт +35% FPS — это важнее. Параллельный режим — только для демо.
+### Процесс перевода сервера на RAW BGR
+
+Для каждого из 4 серверов (YOLO26s, YOLO11_seg, YOLO11_pose, YOLO26_depth):
+
+**1. Копируем папку сервера в `_raw`:**
+```bash
+cp -r yolo26 yolo26_raw
+cd yolo26_raw
+```
+
+**2. Правим `npu_server.cpp` — меняем приём JPEG на raw BGR.**
+
+Было (JPEG):
+```cpp
+uint32_t jpeg_len_be;
+if (!read_n(cli, &jpeg_len_be, 4)) break;
+uint32_t jpeg_len = ntohl(jpeg_len_be);
+if (jpeg_len == 0 || jpeg_len > 10 * 1024 * 1024) break;
+
+vector<unsigned char> jpeg_buf(jpeg_len);
+if (!read_n(cli, jpeg_buf.data(), jpeg_len)) break;
+
+cv::Mat frame = cv::imdecode(jpeg_buf, cv::IMREAD_COLOR);
+```
+
+Стало (RAW):
+```cpp
+uint32_t width_be, height_be, channels_be;
+if (!read_n(cli, &width_be, 4)) break;
+if (!read_n(cli, &height_be, 4)) break;
+if (!read_n(cli, &channels_be, 4)) break;
+
+uint32_t width = ntohl(width_be);
+uint32_t height = ntohl(height_be);
+uint32_t channels = ntohl(channels_be);
+
+if (width == 0 || height == 0 || channels != 3) break;
+if (width > 4096 || height > 4096) break;
+
+uint32_t raw_size = width * height * channels;
+if (raw_size > 20 * 1024 * 1024) break;
+
+vector<unsigned char> raw_buf(raw_size);
+if (!read_n(cli, raw_buf.data(), raw_size)) break;
+
+cv::Mat frame = cv::Mat(height, width, CV_8UC3, raw_buf.data()).clone();
+```
+
+**Важно:** `.clone()` — обязательно, иначе данные raw_buf уничтожаются после выхода из блока.
+
+**3. Меняем SOCKET_PATH на `_raw`:**
+```cpp
+#define SOCKET_PATH "/tmp/npu11_raw.sock"   // было /tmp/npu11.sock
+```
+
+**4. Правим `build_native.sh`:**
+```bash
+# SRC_DIR указывает на папку _raw (не на Model Zoo)
+SRC_DIR=${REPO_DIR}
+
+# Добавляем mkdir -p
+mkdir -p "${SRC_DIR}"
+
+# Удаляем опечатки Model Zoo (если есть)
+rm -f "${SRC_DIR}/yolov26_6_post.cpp" "${SRC_DIR}/yolov26_6_pre.cpp"
+```
+
+**5. Собираем:**
+```bash
+./build_native.sh
+# Копируем вручную (если cp: same file)
+cp -f build/npu_server ./npu_server
+```
+
+**6. Правим `npu_client.py` — отправка raw BGR.**
+
+Было (JPEG):
+```python
+ok, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+jpeg_bytes = jpeg.tobytes()
+self.sock.sendall(struct.pack('>I', len(jpeg_bytes)))
+self.sock.sendall(jpeg_bytes)
+```
+
+Стало (RAW):
+```python
+h, w = frame.shape[:2]
+self.sock.sendall(struct.pack('>I', w))
+self.sock.sendall(struct.pack('>I', h))
+self.sock.sendall(struct.pack('>I', 3))
+self.sock.sendall(frame.tobytes())
+```
+
+**7. Меняем SOCKET_PATH в клиенте:**
+```python
+SOCKET_PATH = "/tmp/npu11_raw.sock"
+```
+
+**8. Добавляем таймаут в `_connect` (10 сек):**
+```python
+attempts = 0
+while attempts < 20:  # 20 × 0.5 = 10 секунд
+    try:
+        ...
+        return
+    except (FileNotFoundError, ConnectionRefusedError) as e:
+        attempts += 1
+        time.sleep(0.5)
+raise ConnectionError(f"[NPUClient] Server {self.socket_path} not available after 10s")
+```
+
+**9. Обновляем systemd-сервис:**
+```bash
+sudo sed -i 's|/root/ugv_rpi/yolo26/|/root/ugv_rpi/yolo26_raw/|g' /etc/systemd/system/npu-server.service
+sudo systemctl daemon-reload
+sudo systemctl restart npu-server.service
+```
+
+**10. Проверяем:**
+```bash
+ls -la /tmp/npu11_raw.sock
+ps aux | grep npu_server | grep -v grep
+# Должен быть процесс из папки _raw
+```
+
+**Повторить для:**
+- `yolo26` -> `yolo26_raw`
+- `yolo11_seg` -> `yolo11_seg_raw`
+- `yolo11_pose` -> `yolo11_pose_raw`
+- `yolo26_depth` -> `yolo26_depth_raw`
+
+### Изменения в `cv_ctrl.py`
+
+Клиенты создаются с таймаутом — не блокируют старт `app.py`:
+```python
+def _try_client(cls, name):
+    try:
+        client = cls()
+        print(f"[cv_ctrl] {name} connected", flush=True)
+        return client
+    except Exception as e:
+        print(f"[cv_ctrl] {name} not available: {e}", flush=True)
+        return None
+
+self.npu_client = _try_client(NPUClient, 'NPUClient')
+self.npu_pose_client = _try_client(NPUPoseClient, 'NPUPoseClient')
+self.npu_seg_client = _try_client(NPUSegClient, 'NPUSegClient')
+self.npu_depth_client = _try_client(NPUDepthClient, 'NPUDepthClient')
+```
 
 
 ## 🚧 Что осталось
@@ -1551,25 +2193,34 @@ WantedBy=multi-user.target
 ### Ближайшее
 
 - [x] **Пересборка Armbian с PR #10835** — GPU, VPU, H.264, CSI.
-- [x] **NPU YOLOv5s** — работает (39 FPS).
 - [x] **Отключение CQE** — eMMC стабильна.
 - [x] **Расширение eMMC** до 29 ГБ.
 - [x] **`TimeoutStopSec=5`**, **`KillMode=control-group`**, **`SendSIGKILL=yes`**.
 - [x] **Обработчик `SIGTERM`** в `app.py`.
 - [x] **Запись видео с параллельным потоком** — GStreamer `tee` + `avenc_mjpeg` + `.mkv`.
+- [x] **YOLO26s** — более точная модель, INT8 (PCQ), 29 FPS.
+- [x] **YOLO11_pose** — 17 keypoints, скелет, 28 FPS.
+- [x] **YOLO26_depth** — карта глубины (n-PCQ, 65 мс, 15 FPS).
+- [x] **YOLO11_seg** — сегментация (uint8, 45 мс, 22 FPS).
+- [x] **4 NPU-сервиса** + 4 Python-клиента (детекция, поза, глубина, сегментация).
+- [x] **Кнопки DEPTH/SEG** в веб-интерфейсе + отдельный блок NPU Depth/Seg.
+- [x] **Передача raw RGB в NPU-сервер** (вместо JPEG) — уменьшит отставание.
+- [ ] **Мульти-клиент для NPU-сервера** (сейчас 1 клиент за раз).
 - [ ] **CSI-камера** — вторая камера (обзорная, на PT).
 - [ ] **GPU** — ускорение OpenCV (OpenCL).
 - [ ] **Переключатель камер** — USB / CSI в веб-интерфейсе.
 - [ ] **ArUco-маркеры** — логика парковки.
+- [ ] **Лидар D500** — SLAM + навигация.
 - [ ] **ESP32 (ИК, сонары)** — код для прошивки.
 
 ### Долгосрочное
 
-- [ ] **MediaPipe на NPU** — если получится портировать.
-- [x] **YOLOv8** — более точная модель - выполнено досрочно.
-- [ ] **Автопилот** — SLAM или визуальная одометрия.
+- [x] **MediaPipe Pose → YOLO11_pose (NPU)** — выполнено.
+- [ ] **MediaPipe Face** — заменить на NPU (по аналогии с pose).
+- [ ] **SLAM** — Cartographer / slam_toolbox + лидар D500.
+- [ ] **Автопилот** — визуальная одометрия / навигация.
+- [ ] **Камера глубины** — Orbbec Gemini 335 или Intel RealSense D435i.
 - [ ] **Голосовое управление** — через `pyttsx3` + распознавание.
-
 
 
 ## 🔗 GitHub-репозиторий
@@ -1591,6 +2242,12 @@ WantedBy=multi-user.target
 - [Ветка ijiki16](https://github.com/ijiki16/build/tree/sun60iw2-4pro-gpu-desktop-upstream)
 - [JSON-команды (Waveshare)](https://www.waveshare.com/wiki/08_Slave_Device_JSON_Instruction_Set)
 - [Jetson-документация](https://www.waveshare.com/wiki/Jetson_03_Pan-Tilt_Control_and_LED_Light_Control)
+- [Allwinner Model Zoo v1.1.0](https://www.aw-ol.com/) — официальный SDK.
+- [Radxa YOLO26 Docs](https://docs.radxa.com/en/cubie/a7a/app-dev/npu-dev/model-zoo/yolo26) — примеры конвертации.
+- [Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26/) — документация.
+- [COCO Keypoints](https://cocodataset.org/#keypoints-2020) — 17 точек скелета.
+
+
 
 ## 👥 Авторы
 
@@ -1598,7 +2255,8 @@ WantedBy=multi-user.target
 - **Waveshare** — оригинальный `ugv_rpi`.
 - **deece** — поддержка A733 в Armbian.
 - **ijiki16** - GPU модули на A733.
-
+- **Allwinner** — Model Zoo v1.1.0, ACUITY Toolkit.
+- 
 ## 📅 История изменений
 
 - **2026-09-28:** Первый запуск Orange Pi 4 Pro, UART7, I2C2, NPU, YOLOv5s, кнопки веб-интерфейса.
@@ -1607,9 +2265,43 @@ WantedBy=multi-user.target
 - **2026-10-02:** GStreamer `tee` — запись без прерывания живого потока. Контейнер `.mkv` (matroskamux) — VFR сохранён.
 - **2026-10-03:** Переключение режима камеры (1080p30 ↔ 720p60) по кнопке WebRTC. RES-индикатор в OSD. Динамический FPS-лимит в `generate_frames`. Проверено с NPU и записью.
 - **2026-10-05:** YOLO11s сконвертирована в INT8 (`.nb` 6.6 МБ), C++ демо собрано нативно на Orange Pi, тест пройден (27 FPS, `dog: 92%`). Пайплайн: Allwinner Model Zoo v1.1.0 + ACUITY Toolkit 6.30.22 + Docker `ubuntu-npu:v2.0.10.2`. Папка `yolo11/` добавлена в репозиторий.
-- **2026-10-06:** YOLO26s INT8 (PCQ) сконвертирована, `npu_server` пересобран под YOLO26. FPS 29 (1080p30) / 60 (720p60). CPU ~36-38%. Удалённые объекты — лучше. Папка `yolo26/` в репозитории. Commit `b83d513`.
-- **2026-10-06:** YOLO11_pose INT8 сконвертирована. Второй NPU-сервер (`npu_pose_server`). Python-клиент. Асинхронный pose-воркер. Отрисовка скелета (17 keypoints). FPS ~28. Переключение OBJECTS ↔ MP POSE мгновенное. Commit `f8d8da8`.
-
+- **2026-10-06:** YOLO26s INT8 (PCQ) сконвертирована, `npu_server` пересобран под YOLO26. FPS 29 (1080p30) / 60 (720p60). CPU ~36-38%. Удалённые объекты — лучше. Отставание <0.3 сек через NPU-сервер (UNIX-сокет). Папка `yolo26/` в репозитории. Commit `b83d513`.
+- **2026-10-06:** YOLO11_pose на NPU (17 keypoints, скелет). Второй NPU-сервер (`npu-pose-server.service`). Python-клиент. Асинхронный pose-воркер. Отрисовка скелета (17 keypoints). FPS ~28. Переключение OBJECTS ↔ MP POSE мгновенное. Commit `f8d8da8`.
+- **2026-10-07:** CQE-баг побеждён. Патч `cqhci_halt` (polling + очистка `CQHCI_CTL` + `ret = true`). eMMC HS400 @ **150 МГц**, скорость чтения **205 МБ/с** (было 80 на 50 МГц). Патчи в `patches/kernel/` (0001-cqhci, 0002-sun60iw2p1). Commit `064afa2`.
+- **2026-10-08:** Универсальный **auto-detect FPS** для камеры (`GstStream.detect_max_fps` — парсит `v4l2-ctl --list-formats-ext`, выбирает максимальный FPS для каждого разрешения). Кнопка WebRTC → переключение 1080p/720p с автоопределением. OSD показывает реальный режим (`720p30`, `720p60`). Commit `7eb80c0`.
+- **2026-10-08:** YOLO26_depth сконвертирован (n-PCQ 65 мс, ~15 FPS; n-int16 158 мс; s-int16 244 мс). `npu_depth_server` + `npu_depth_client.py`. Формат JSON: сетка 16×16 + near-RLE. Папка `yolo26_depth/` в репозитории.
+- **2026-10-08:** YOLO11_seg сконвертирован (uint8, 45 мс, ~22 FPS). `npu_seg_server` + `npu_seg_client.py`. RLE-сжатие масок. Папка `yolo11_seg/` в репозитории. Commit `99edae6`.
+- **2026-10-09:** Интеграция depth + seg в веб-интерфейс.
+  - `cv_ctrl.py`: воркеры `_npu_seg_worker`, `_npu_depth_worker` + отрисовка (heatmap, маски).
+  - `app.py`: `cmd_actions` для `T=10310` (DEPTH), `T=10311` (SEG).
+  - `templates/index.html`: новый блок **NPU Depth/Seg** (2 кнопки: DEPTH, SEG).
+  - `templates/control.js`: `sendCmdDepth()`, `sendCmdSeg()`, отдельная обработка `DSButtons`.
+  - `config.yaml`: `cv_depth: 10310`, `cv_seg: 10311`.
+  - `npu-seg-server.service` + `npu-depth-server.service` (systemd, автозапуск).
+  - Итог: **4 NPU-сервиса** работают параллельно (детекция, поза, глубина, сегментация).
+- **2026-10-09:** NVMe SSD + SPI Flash. U-Boot с патчем `dc1sw1` прошит в SPI. Система перенесена на NVMe (570 МБ/с, Gen3). eMMC вынута (бэкап). Загрузка: SPI → NVMe.
+- **2026-10-09:** ArUco-маркеры. Детекция через OpenCV (CPU), точность ±2 см на 1.35 м. Кнопка ARUCO в веб. Клиент `aruco_client.py` с калибровкой (`focal=1041.7`). Commit `ce36e56`.
+- **2026-10-10:** ROADMAP пересмотрен. **Гибридный** подход (без ROS2) — **основной**. Добавлены разделы: **Sensor Fusion** (лидар + depth), **Лидарная защита** (< 0.4 м). SLAM — **Hector SLAM** (не Cartographer). Навигация — **VFH** (не Nav2).
+- **2026-10-10:** Стресс-тест NPU (4 модели, 720p60, 70 сек). CPU 16.4% avg / 41.7% max, TEMP 36 °C. 4 модели параллельно — 5.6 FPS. 720p60 быстрее 1080p30 на 20-36%.
+- **2026-10-10:** Полная калибровка камеры (шахматная доска 5×8, 30 мм, 25 кадров). RMS=0.3475. ArUco стал точнее: **±1 см на 1.35 м (~0.7%)** (было ±2 см, ~1.5%). Файл `camera_calib.npz` загружается в `aruco_client.py`.
+- **2026-10-10:** Фиксация фокуса камеры. `focus_automatic_continuous=0`, `focus_absolute=671`. Автоматизация через `ExecStartPre` в `ugv.service`. Цвет переключён на **green** (красный пересекается с оранжевым вечером). ArUco калибровка (RMS=0.3475), масштабирование `camera_matrix` под разрешение.
+- **2026-10-10:** RAW BGR для всех 4 NPU-серверов. Прирост FPS: OBJECTS +35%, POSE +57%, SEG +26%, DEPTH +25%. CPU max упал с 100% до 26%. GIL подтверждён как узкое место параллельного RAW. Commit `44dc299`.
 ---
 
-**Последнее обновление:** 2026-10-03
+**Последнее обновление:** 2026-10-10
+
+**PROJECT:** [PROJECT.md](https://github.com/ZHNovell/ugv_rpi/blob/main/PROJECT.md) 
+**ROADMAP:** [PROJECT.md](https://github.com/ZHNovell/ugv_rpi/blob/main/ROADMAP.md) 
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/gpl-3.0.txt>.

@@ -2,7 +2,7 @@
 
 * **Версия:** 1.1
 * **Последнее обновление:** 2026-10-19
-* **Платформа:** Orange Pi 4 Pro (Allwinner A733, NPU 3 TOPS) + General Driver for Robots (ESP32) + шасси WAVE ROVER + 2-Axis Pan-Tilt (ST3215) + лидар D500+AX-M1
+* **Платформа:** Orange Pi 4 Pro (Allwinner A733, NPU 3 TOPS) + General Driver for Robots (ESP32) + шасси WAVE ROVER + 2-Axis Pan-Tilt (ST3215) + лидар D500 + AX-M1
 
 ---
 

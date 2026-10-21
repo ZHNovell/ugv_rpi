@@ -1,6 +1,6 @@
 var robot_name, cmd_movition_ctrl, max_speed, slow_speed;
 var cmd_gimbal_ctrl, cmd_gimbal_steady, cmd_arm_ctrl_ui;
-var max_rate, mid_rate, min_rate, arm_default_e, arm_default_r, arm_default_z; 
+var max_rate, mid_rate, min_rate, default_rate, arm_default_e, arm_default_r, arm_default_z; 
 var max_res, mid_res, min_res; 
 var zoom_x1, zoom_x2, zoom_x4;
 var pic_cap, vid_sta, vid_end, cam_toggle;
@@ -35,6 +35,7 @@ fetch('/config')
       max_rate  = yamlObject.args_config.max_rate;
       mid_rate  = yamlObject.args_config.mid_rate;
       min_rate  = yamlObject.args_config.min_rate;
+      default_rate = yamlObject.args_config.default_rate;
       arm_default_e = yamlObject.args_config.arm_default_e;
       arm_default_z = yamlObject.args_config.arm_default_z;
       arm_default_r = yamlObject.args_config.arm_default_r;
@@ -109,6 +110,11 @@ fetch('/config')
 
       if (robot_name) {
         document.title = robot_name + " WEB CTRL";
+      }
+      
+      // Подсветить кнопку Speed Ctrl по значению default_rate из config
+      if (typeof default_rate !== 'undefined' && default_rate !== null) {
+        highlightSpeedButton(default_rate);
       }
     } catch (e) {
       console.error('Error parsing YAML file:', e);
@@ -755,17 +761,17 @@ socket.on('update', function(data) {
         document.getElementById("photos-size").innerHTML = data[picture_size] + " MB";
         document.getElementById("videos-size").innerHTML = data[video_size] + " MB";
 
-        document.getElementById("v_in").innerHTML = (data[base_voltage]/100).toFixed(1);
+        document.getElementById("v_in").innerHTML = (data[base_voltage]).toFixed(1);
         
         var element = document.getElementById("b_state");
         element.classList.remove("baterry_state", "baterry_state1", "baterry_state2", "baterry_state3");
-        if ((data[base_voltage]/100) >= 10.5) {
+        if ((data[base_voltage]) >= 10.5) {
             element.classList.add("baterry_state");
-        } else if ((data[base_voltage]/100) >= 10) {
+        } else if ((data[base_voltage]) >= 10) {
             element.classList.add("baterry_state","baterry_state3");
-        } else if ((data[base_voltage]/100) >= 9.5) {
+        } else if ((data[base_voltage]) >= 9.5) {
             element.classList.add("baterry_state","baterry_state2");
-        } else if ((data[base_voltage]/100) < 9.5) {
+        } else if ((data[base_voltage]) < 9.5) {
             element.classList.add("baterry_state","baterry_state1");
         }
     } catch(e) {
@@ -856,27 +862,56 @@ function cmdJsonCmd(jsonData){
     if (jsonData.T == cmd_movition_ctrl) {
         heartbeat_left = jsonData.L;
         heartbeat_right = jsonData.R;
-        jsonData.L = heartbeat_left * speed_rate;
-        jsonData.R = heartbeat_right * speed_rate;
     }
     socketJson.emit('json', jsonData);
 }
 
-function speedCtrl(inputSpd){
+function speedCtrl(inputSpd, buttonIndex){
     speed_rate = inputSpd;
     defaultSpeed = speed_rate;
-    var spdCtrlBtn = document.getElementById("speed_ctrl_btn");
-    var spdbuttons = spdCtrlBtn.getElementsByTagName("button");
-    removeButtonsClass(spdbuttons);
-    if (speed_rate <= 0.30) {
-        spdbuttons[0].classList.add("ctl_btn_active");
-    } else if (speed_rate > 0.30 && speed_rate < 0.70) {
-        spdbuttons[1].classList.add("ctl_btn_active");
-    } else if (speed_rate >= 0.70) {
-        spdbuttons[2].classList.add("ctl_btn_active");
+    if (typeof buttonIndex !== 'undefined') {
+        highlightSpeedButtonByIndex(buttonIndex);
+    } else {
+        highlightSpeedButton(speed_rate);
     }
     // Отправляем команду в UART
     sendCommand('base -c {"T":138,"L":' + speed_rate + ',"R":' + speed_rate + '}');
+}
+
+// Подсветка по индексу кнопки
+function highlightSpeedButtonByIndex(index) {
+    var spdCtrlBtn = document.getElementById("speed_ctrl_btn");
+    if (!spdCtrlBtn) return;
+    var spdbuttons = spdCtrlBtn.getElementsByTagName("button");
+    removeButtonsClass(spdbuttons);
+    if (spdbuttons[index]) {
+        spdbuttons[index].classList.add("ctl_btn_active");
+    }
+}
+
+// Подсветка кнопки Speed Ctrl по ближайшему значению
+function highlightSpeedButton(rate) {
+    if (typeof min_rate === 'undefined' || typeof mid_rate === 'undefined' || typeof max_rate === 'undefined') {
+        return;
+    }
+    var spdCtrlBtn = document.getElementById("speed_ctrl_btn");
+    if (!spdCtrlBtn) return;
+    var spdbuttons = spdCtrlBtn.getElementsByTagName("button");
+    removeButtonsClass(spdbuttons);
+    
+    var rates = [min_rate, mid_rate, max_rate];
+    var closest = 0;
+    var minDiff = Math.abs(rate - rates[0]);
+    for (var i = 1; i < rates.length; i++) {
+        var diff = Math.abs(rate - rates[i]);
+        if (diff < minDiff) {
+            minDiff = diff;
+            closest = i;
+        }
+    }
+    if (spdbuttons[closest]) {
+        spdbuttons[closest].classList.add("ctl_btn_active");
+    }
 }
 
 var steady_mode = false;

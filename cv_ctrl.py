@@ -424,7 +424,7 @@ class OpencvFuncs():
 
         except Exception as e:
             print(f"[cv_ctrl._process_frame_opencv] error: {e}")
-            import numpy as np
+
             placeholder = 255 * np.ones((480, 640, 3), dtype=np.uint8)
             ret, buffer = cv2.imencode('.jpg', placeholder, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
             return buffer.tobytes()
@@ -436,7 +436,7 @@ class OpencvFuncs():
             input_frame = self.gst_stream.get_frame()
             if input_frame is None:
                 # Первый кадр ещё не пришёл — заглушка
-                import numpy as np
+
                 placeholder = 255 * np.ones((720, 1280, 3), dtype=np.uint8)
                 cv2.putText(placeholder, "Waiting for first frame...",
                             (400, 360), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
@@ -905,7 +905,7 @@ class OpencvFuncs():
 
     def _npu_worker(self):
         """Бесконечный цикл: берёт последний кадр, запускает NPU, обновляет overlay."""
-        import numpy as np
+
         while not self.npu_stop_flag:
             # Проверяем, что режим всё ещё cv_objs
             if self.cv_mode != f['code']['cv_objs']:

@@ -150,16 +150,24 @@ class BaseController:
 	def feedback_data(self):
 		try:
 			while self.rl.s.in_waiting > 0:
-				self.data_buffer = json.loads(self.rl.readline().decode('utf-8'))
-				if 'T' in self.data_buffer:
-					self.base_data = self.data_buffer
-					self.data_buffer = None
-					if self.base_data["T"] == 1003:
-						print(self.base_data)
-						return self.base_data
-			self.rl.clear_buffer()
-			self.data_buffer = json.loads(self.rl.readline().decode('utf-8'))
-			self.base_data = self.data_buffer
+				line = self.rl.readline().decode('utf-8', errors='ignore')
+				for part in line.splitlines():
+					part = part.strip()
+					if not part:
+						continue
+					try:
+						self.data_buffer = json.loads(part)
+						if 'T' in self.data_buffer:
+							# Ищем телеметрию (T:1001) или данные с 'v'
+							if self.data_buffer.get('T') == 1001 and 'v' in self.data_buffer:
+								self.base_data = self.data_buffer
+								return self.base_data
+							elif self.data_buffer.get('T') == 1003:
+								self.base_data = self.data_buffer
+								print(self.base_data)
+								return self.base_data
+					except json.JSONDecodeError:
+						continue
 			return self.base_data
 		except Exception as e:
 			self.rl.clear_buffer()
@@ -173,12 +181,14 @@ class BaseController:
 
 
 	def send_command(self, data):
+		print(f"[send_command] {data}", flush=True)
 		self.command_queue.put(data)
 
 
 	def process_commands(self):
 		while True:
 			data = self.command_queue.get()
+			print(f"[process_commands] writing: {data}", flush=True)
 			self.ser.write((json.dumps(data) + '\n').encode("utf-8"))
 
 
@@ -265,7 +275,7 @@ class BaseController:
 
 if __name__ == '__main__':
 	# RPi5
-	base = BaseController('/dev/ttyS7', 115200)
+	base = BaseController('/dev/ttyUSB0', 115200)
 
 	# RPi4B
 	# base = BaseController('/dev/serial0', 115200)

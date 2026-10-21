@@ -76,9 +76,9 @@ class SystemInfo(threading.Thread):
             result = subprocess.check_output(['/usr/sbin/iw', 'dev', 'wlan0', 'info'],
                                              encoding='utf-8',
                                              stderr=subprocess.DEVNULL)
-            if "Mode:Master" in result or "Mode:AP" in result:
+            if "type AP" in result or "type master" in result:
                 return "AP"
-            if "Mode:Managed" in result:
+            if "type managed" in result:
                 return "STA"
         except subprocess.CalledProcessError as e:
             print(f"Error checking Wi-Fi mode: {e}")

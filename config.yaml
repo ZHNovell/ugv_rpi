@@ -2,11 +2,11 @@ args_config:
   arm_default_e: 60
   arm_default_r: 0
   arm_default_z: 24
-  max_rate: 1.0
-  max_speed: 1.3
-  mid_rate: 0.66
-  min_rate: 0.3
-  slow_speed: 0.2
+  max_rate: 0.9
+  max_speed: 0.5
+  mid_rate: 0.7
+  min_rate: 0.55
+  slow_speed: 0.15
 audio_config:
   audio_output: true
   default_volume: 1.0
@@ -15,9 +15,9 @@ audio_config:
 base_config:
   add_osd: false
   extra_sensor: false
-  main_type: 2
-  module_type: 0
-  robot_name: UGV Rover
+  main_type: 1
+  module_type: 2
+  robot_name: Orange
   sbc_version: 0.93
   use_lidar: false
 cmd_config:
@@ -79,7 +79,7 @@ cv:
   - 110
   - 255
   - 255
-  default_color: green
+  default_color: blue
   min_radius: 12
   sampling_rad: 25
   track_acc_rate: 0.4

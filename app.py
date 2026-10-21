@@ -6,7 +6,7 @@ import sys
 import yaml, os
 
 # Orange Pi 4 Pro — UART7
-base = BaseController('/dev/ttyS7', 115200)
+base = BaseController('/dev/ttyUSB0', 115200)
 
 threading.Thread(target=lambda: base.breath_light(15), daemon=True).start()
 
@@ -626,6 +626,7 @@ def cmd_on_boot():
         'base -c {"T":142,"cmd":50}',   # set feedback interval
         'base -c {"T":131,"cmd":1}',    # serial feedback flow on
         'base -c {"T":143,"cmd":0}',    # serial echo off
+        'base -c {"T":138,"L":0.66,"R":0.66}',  # set speed rate to Middle by default
         'base -c {{"T":4,"cmd":{}}}'.format(f['base_config']['module_type']),      # select the module - 0:None 1:RoArm-M2-S 2:Gimbal
         'base -c {"T":300,"mode":0,"mac":"EF:EF:EF:EF:EF:EF"}',  # the base won't be ctrl by esp-now broadcast cmd, but it can still recv broadcast megs.
         'send -a -b'    # add broadcast mac addr to peer

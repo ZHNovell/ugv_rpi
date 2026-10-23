@@ -397,6 +397,28 @@ pip install imageio pygame-ce pyttsx3 netifaces
 - **pygame-ce** (не pygame — нет wheel для Python 3.13 + ARM64).
 - **av 17.1.0** (не 12.3.0).
 - **aiortc 1.15.0** (не 1.8.0).
+
+## 🖐️ MediaPipe (HAND GS)
+
+Wheel для Orange Pi 4 Pro (aarch64, Python 3.13):
+https://github.com/ZHNovell/ugv_rpi/releases/download/mediapipe-0.10.14-aarch64/mediapipe-0.10.14.dev0-cp313-cp313-linux_aarch64.whl
+
+Установка:
+```
+pip3 install --break-system-packages --ignore-installed --force-reinstall https://github.com/ZHNovell/ugv_rpi/releases/download/mediapipe-0.10.14-aarch64/mediapipe-0.10.14.dev0-cp313-cp313-linux_aarch64.whl
+```
+
+Проверка:
+```
+python3 -c "import mediapipe as mp; print(mp.__version__)"
+```
+
+Модель hand landmarker:
+```
+wget -O /tmp/hand_landmarker.task https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+```
+
+
 ## 🧠 NPU-серверы
 
 **4 NPU-сервера** через UNIX-сокеты. Все работают параллельно.

@@ -417,7 +417,23 @@ python3 -c "import mediapipe as mp; print(mp.__version__)"
 ```
 wget -O /tmp/hand_landmarker.task https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
 ```
+### 🎯 Motion (Object Detection через YOLO26s NPU)
 
+Режим **Motion** (Simple Detection Type) теперь использует **YOLO26s на NPU** (`/tmp/npu11.sock`), а не `absdiff` или `efficientdet`. Это даёт:
+
+- **Точность:** находит **людей** (класс `person`), а не абстрактное движение.
+- **Скорость:** ~53 мс на кадр (NPU), боксы обновляются быстро.
+- **Устойчивость:** не «сходит с ума», когда камера двигается (в отличие от `absdiff`).
+- **Dead Zone:** если объект в центре (60 пикселей), серва не дёргается.
+- **Подсветка:** при обнаружении включает прожектор (IO5) в режиме AUTO.
+
+**Код:** `cv_detect_movition` в `cv_ctrl.py` (вызов `self.npu_client.detect(img)`).
+
+### 📷 WebRTC Resolution Switcher
+
+Кнопка **WebRTC** заменена на выпадающий список **1080P / 720P**. Переключение — мгновенное (через `set_camera_mode()` и `GstStream.switch_mode()`).
+
+**Код:** `set_camera_mode()` в `cv_ctrl.py`, команды `cam_1080` (10108) и `cam_720` (10109) в `config.yaml`.
 
 ## 🧠 NPU-серверы
 

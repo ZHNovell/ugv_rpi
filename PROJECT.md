@@ -488,6 +488,14 @@ cd /root/ugv_rpi/yolo26/
 
 **Итог:** YOLO11_pose работает на NPU A733 через **второй NPU-сервер** (`npu_pose_server`, сокет `/tmp/npu_pose.sock`). **Заменяет MediaPipe Pose** (который не работает на A733). Кнопка **MP POSE** в веб-интерфейсе теперь использует **NPU-инференс**.
 
+### MediaPipe на Orange Pi 4 Pro (2026-10-23)
+
+MediaPipe 0.10.14 собран из исходников под aarch64 + Python 3.13.
+Wheel: https://github.com/ZHNovell/ugv_rpi/releases/tag/mediapipe-0.10.14-aarch64
+Проверено: hand landmarker (2 руки, 21 landmark).
+HAND GS (T:10306) теперь работает через MediaPipe.
+
+
 ### Что нового
 
 1. **YOLO11_pose INT8 (uint8)** сконвертирована в `.nb` (7 МБ).

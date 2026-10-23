@@ -223,16 +223,6 @@ function updateVideoList() {
 updateVideoList();
 
 
-//video pixel
-var listItems = $("#video_pixel_btn_list").children("li");
-listItems.on("click", function () {
-    var innertext = $(this).text();
-    $("#video_pixel_btn").text(innertext);
-    $("#video_pixel_btn_list").css("display", "none");
-    setTimeout(function () {
-        $("#video_pixel_btn_list").removeAttr("style");
-    }, 10);  
-});
 
 //record function
 var isRecording = false;
@@ -290,6 +280,21 @@ $("#zoom_btn").click(function(){
         break;
     }
     zoomx = (zoomx + 1) % 3;
+});
+
+// video pixel (resolution) switcher
+$("#video_pixel_btn").click(function(e){
+    e.stopPropagation();
+    $("#video_pixel_btn_list").toggle();
+});
+$("#video_pixel_btn_list li").click(function(e){
+    var label = $(this).text();
+    $("#video_pixel_btn").text(label);
+    $("#video_pixel_btn_list").hide();
+});
+// Закрываем список при клике вне его
+$(document).click(function(){
+    $("#video_pixel_btn_list").hide();
 });
 
 //joy stick function

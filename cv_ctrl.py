@@ -93,6 +93,9 @@ class OpencvFuncs():
         self.writer = None
         self.gst_stream = None
         self.camera_mode = '1080p30'  # current camera mode
+        self._motion_pause_until = 0  # ignore motion frames while servo moves
+        self._last_motion_target = None  # (x, y) previous target
+        self._dead_zone = 60  # pixels around center where we don't move
         self.overlay = None
         self.scale_rate = 1
         self.video_quality = f['video']['default_quality']
@@ -172,26 +175,51 @@ class OpencvFuncs():
         self.npu_temp_path = "/tmp/yolo_input.jpg"
 
         # mediapipe (only if available)
+        # MediaPipe Tasks API (0.10.x) — старый mp.solutions удалён.
+        # HAND GS: HandLandmarker из tasks API.
+        self.hand_landmarker = None
+        self.object_detector = None
         if MEDIAPIPE_AVAILABLE:
-            self.mpDraw = mp.solutions.drawing_utils
-            self.mpHands = mp.solutions.hands
-            self.hands = self.mpHands.Hands(max_num_hands=1)
-            self.mp_face_detection = mp.solutions.face_detection
-            self.face_detection = self.mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
-            self.mp_pose = mp.solutions.pose
-            self.pose = self.mp_pose.Pose(static_image_mode=False,
-                                        model_complexity=1,
-                                        smooth_landmarks=True,
-                                        min_detection_confidence=0.5,
-                                        min_tracking_confidence=0.5)
-        else:
-            self.mpDraw = None
-            self.mpHands = None
-            self.hands = None
-            self.mp_face_detection = None
-            self.face_detection = None
-            self.mp_pose = None
-            self.pose = None
+            try:
+                from mediapipe.tasks import python as mp_python
+                from mediapipe.tasks.python import vision
+                model_path = thisPath + '/models/hand_landmarker.task'
+                if os.path.exists(model_path):
+                    base_options = mp_python.BaseOptions(model_asset_path=model_path)
+                    options = vision.HandLandmarkerOptions(
+                        base_options=base_options,
+                        running_mode=vision.RunningMode.IMAGE,
+                        num_hands=1
+                    )
+                    self.hand_landmarker = vision.HandLandmarker.create_from_options(options)
+                    print("[cv_ctrl] HandLandmarker (Tasks API) initialized", flush=True)
+                
+                # Object Detector для Motion
+                obj_model_path = thisPath + '/models/efficientdet_lite2.tflite'
+                if os.path.exists(obj_model_path):
+                    obj_base_options = mp_python.BaseOptions(model_asset_path=obj_model_path)
+                    obj_options = vision.ObjectDetectorOptions(
+                        base_options=obj_base_options,
+                        running_mode=vision.RunningMode.IMAGE,
+                        max_results=5,
+                        score_threshold=0.3
+                    )
+                    self.object_detector = vision.ObjectDetector.create_from_options(obj_options)
+                    print("[cv_ctrl] ObjectDetector (Motion) initialized", flush=True)
+                else:
+                    print(f"[cv_ctrl] efficientdet_lite0.tflite not found: {obj_model_path}", flush=True)
+            except Exception as e:
+                print(f"[cv_ctrl] HandLandmarker init error: {e}", flush=True)
+                self.hand_landmarker = None
+        # MP FACE и MP POSE через старый API недоступны (mp.solutions удалён).
+        # Они заменены на NPU (YOLO11_pose) и не используются.
+        self.mpDraw = None
+        self.mpHands = None
+        self.hands = None
+        self.mp_face_detection = None
+        self.face_detection = None
+        self.mp_pose = None
+        self.pose = None
 
         self.max_distance = 1
         self.gs_pic_interval = 6
@@ -363,10 +391,15 @@ class OpencvFuncs():
 
                 # Накладываем overlay (для всех режимов)
                 try:
-                    if self.overlay is not None and self.overlay.shape == input_frame.shape:
-                        mask = self.overlay.astype(bool)
-                        input_frame[mask] = self.overlay[mask]
-                        cv2.addWeighted(self.overlay, 1, input_frame, 1, 0, input_frame)
+                    if self.overlay is not None:
+                        # Если overlay меньше кадра (после resize) — масштабируем до размера кадра
+                        if self.overlay.shape != input_frame.shape:
+                            ov = cv2.resize(self.overlay, (input_frame.shape[1], input_frame.shape[0]), interpolation=cv2.INTER_NEAREST)
+                        else:
+                            ov = self.overlay
+                        mask = ov.astype(bool)
+                        input_frame[mask] = ov[mask]
+                        cv2.addWeighted(ov, 1, input_frame, 1, 0, input_frame)
                 except Exception as e:
                     print(f"[cv_ctrl._process_frame_opencv] overlay error: {e}")
             elif self.show_info_flag:
@@ -659,6 +692,31 @@ class OpencvFuncs():
     def picture_capture(self):
         self.picture_capture_flag = True
 
+    def set_camera_mode(self, width, height):
+        """Явно переключает GStreamer на width x height (fps auto-detect)."""
+        if self.gst_stream is None:
+            print("[cv_ctrl] gst_stream not available, cannot switch mode", flush=True)
+            return False
+        if self.video_record_status_flag:
+            print("[cv_ctrl] cannot switch camera while recording", flush=True)
+            return False
+        try:
+            self.gst_stream.switch_mode(width, height)
+        except Exception as e:
+            print(f"[cv_ctrl] switch_mode error: {e}", flush=True)
+            return False
+        real_fps = getattr(self.gst_stream, 'fps', 30)
+        self.camera_mode = f"{height}p{real_fps}"
+        print(f"[cv_ctrl] set_camera_mode -> {self.camera_mode}", flush=True)
+        # Пересоздаём ArUco-клиент с новым разрешением
+        try:
+            from aruco_client import ArucoClient
+            self.aruco_client = ArucoClient(frame_w=width, frame_h=height)
+            print(f"[cv_ctrl] ArucoClient recreated for {width}x{height}", flush=True)
+        except Exception as e:
+            print(f"[cv_ctrl] ArucoClient recreate error: {e}", flush=True)
+        return True
+
     def toggle_camera_mode(self):
         """Switch camera between 1080 and 720. FPS auto-detected per resolution."""
         if self.gst_stream is None:
@@ -756,51 +814,71 @@ class OpencvFuncs():
 
 
     def cv_detect_movition(self, img):
-        timestamp = datetime.datetime.now()
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (21, 21), 0)
-
-        if self.avg is None:
-            self.avg = gray.copy().astype("float")
-            return
+        # Motion через YOLO26s (NPU-сервер, /tmp/npu11.sock).
+        # Ищем людей (person). Если нужно другое — поменяй TARGET_CLASS.
+        TARGET_CLASS = "person"
+        
+        # CV-режимы работают на 640x480, чтобы gimbal_track не «уводил» при FullHD.
+        if img.shape[1] > 640:
+            img = cv2.resize(img, (640, 480), interpolation=cv2.INTER_AREA)
+        
+        # Детекция через NPU (синхронно)
         try:
-            cv2.accumulateWeighted(gray, self.avg, 0.5)
-        except:
+            detections = self.npu_client.detect(img)
+        except Exception as e:
+            print(f"[cv_detect_movition] NPU error: {e}", flush=True)
             return
-        frameDelta = cv2.absdiff(gray, cv2.convertScaleAbs(self.avg))
-
-        # threshold the delta image, dilate the thresholded image to fill
-        # in holes, then find contours on thresholded image
-        thresh = cv2.threshold(frameDelta, 5, 255, cv2.THRESH_BINARY)[1]
-        thresh = cv2.dilate(thresh, None, iterations=2)
-        cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cnts = imutils.grab_contours(cnts)
-        # loop over the contours
+        
         overlay_buffer = np.zeros_like(img)
-        for c in cnts:
-            # if the contour is too small, ignore it
-            if cv2.contourArea(c) < 2000:
+        height, width = img.shape[:2]
+        center_x, center_y = width // 2, height // 2
+        
+        max_area = 0
+        max_motion_center = None
+        
+        # Ищем самый крупный объект нужного класса
+        for det in detections:
+            if det['class'] != TARGET_CLASS:
                 continue
-            # compute the bounding box for the contour, draw it on the frame,
-            # and update the text
-            (mov_x, mov_y, mov_w, mov_h) = cv2.boundingRect(c)
-            cv2.rectangle(overlay_buffer, (mov_x, mov_y), (mov_x + mov_w, mov_y + mov_h), (128, 255, 0), 1)
-            self.last_movtion_captured = timestamp
-
-            if(timestamp - self.last_frame_capture_time).seconds >= 1:
-                if self.detection_reaction_mode == f['code']['re_none']:
-                    pass
-                elif self.detection_reaction_mode == f['code']['re_capt']: 
-                    self.picture_capture()
-                elif self.detection_reaction_mode == f['code']['re_reco']:
-                    self.video_record(True)
-                self.last_frame_capture_time = datetime.datetime.now()
             
-        if (timestamp - self.last_movtion_captured).seconds >= 1.5:
-            if self.detection_reaction_mode == f['code']['re_reco']:
-                if(timestamp - self.last_frame_capture_time).seconds >= 5:
-                    self.video_record(False)
-
+            x0, y0, x1, y1 = det['bbox']
+            x0, y0, x1, y1 = int(round(x0)), int(round(y0)), int(round(x1)), int(round(y1))
+            
+            area = (x1 - x0) * (y1 - y0)
+            if area > max_area:
+                max_area = area
+                max_motion_center = ((x0 + x1) // 2, (y0 + y1) // 2)
+                
+                # Рисуем рамку
+                cv2.rectangle(overlay_buffer, (x0, y0), (x1, y1), (0, 255, 0), 2)
+                label = f"{TARGET_CLASS}: {det['confidence']:.2f}"
+                cv2.putText(overlay_buffer, label, (x0, y0 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        # Логика слежения (Dead Zone + пауза)
+        if max_motion_center is not None:
+            # Подсветка
+            if self.cv_light_mode == 1:
+                if self.base_ctrl.head_light_status == 0:
+                    self.base_ctrl.head_light_status = 255
+                    self.base_ctrl.lights_ctrl(self.base_ctrl.base_light_status, self.base_ctrl.head_light_status)
+            
+            # Dead Zone: если объект в центре, не двигаемся
+            if not self.cv_movtion_lock:
+                dist_to_center = math.sqrt((max_motion_center[0] - center_x)**2 + (max_motion_center[1] - center_y)**2)
+                if dist_to_center > self._dead_zone:
+                    self.gimbal_track(center_x, center_y, max_motion_center[0], max_motion_center[1], self.track_faces_iterate)
+                    self._last_motion_target = max_motion_center
+                    self._motion_pause_until = time.time() + 0.5
+                else:
+                    self._last_motion_target = max_motion_center
+        else:
+            # Объект не найден — гасим свет
+            if self.cv_light_mode == 1:
+                if self.base_ctrl.head_light_status != 0:
+                    self.base_ctrl.head_light_status = 0
+                    self.base_ctrl.lights_ctrl(self.base_ctrl.base_light_status, self.base_ctrl.head_light_status)
+        
         self.overlay = overlay_buffer
 
     def gimbal_track(self, fx, fy, gx, gy, iterate):
@@ -826,6 +904,9 @@ class OpencvFuncs():
         return distance
 
     def cv_detect_faces(self, img):
+        # CV-режимы работают на 640x480, чтобы gimbal_track не «уводил» при FullHD.
+        if img.shape[1] > 640:
+            img = cv2.resize(img, (640, 480), interpolation=cv2.INTER_AREA)
         gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         faces = self.faceCascade.detectMultiScale(
                 gray_img,     
@@ -979,6 +1060,9 @@ class OpencvFuncs():
 
     def cv_detect_color(self, img):
         global head_light_pwm
+        # CV-режимы работают на 640x480, чтобы gimbal_track не «уводил» при FullHD.
+        if img.shape[1] > 640:
+            img = cv2.resize(img, (640, 480), interpolation=cv2.INTER_AREA)
         blurred = cv2.GaussianBlur(img, (11, 11), 0)
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
 
@@ -1091,75 +1175,102 @@ class OpencvFuncs():
         return (value - original_min) / (original_max - original_min) * (new_max - new_min) + new_min
 
     def mp_detect_hand(self, img):
-        if not MEDIAPIPE_AVAILABLE:
+        # HAND GS через MediaPipe Tasks API (HandLandmarker).
+        if not MEDIAPIPE_AVAILABLE or self.hand_landmarker is None:
             return img, 0
+        # CV-режимы работают на 640x480, чтобы gimbal_track не «уводил» при FullHD.
+        if img.shape[1] > 640:
+            img = cv2.resize(img, (640, 480), interpolation=cv2.INTER_AREA)
+
         height, width = img.shape[:2]
         center_x, center_y = width // 2, height // 2
 
-        imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        results = self.hands.process(imgRGB)
+        # BGR -> RGB, затем в mp.Image
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
 
-        overlay_buffer = np.zeros_like(imgRGB)
+        try:
+            result = self.hand_landmarker.detect(mp_image)
+        except Exception as e:
+            print(f"[mp_detect_hand] detect error: {e}", flush=True)
+            return img, 0
+
+        overlay_buffer = np.zeros_like(img_rgb)
         get_pwm = 0
 
-        if results.multi_hand_landmarks:
-            for handLms in results.multi_hand_landmarks:
-                # draw joints
-                for id, lm in enumerate(handLms.landmark):
-                    h, w, c = imgRGB.shape
-                    cx, cy = int(lm.x * w), int(lm.y * h)
+        # Индексы ключевых точек (MediaPipe HandLandmarker)
+        WRIST = 0
+        THUMB_TIP = 4
+        INDEX_FINGER_MCP = 5
+        INDEX_FINGER_PIP = 6
+        INDEX_FINGER_TIP = 8
+        MIDDLE_FINGER_MCP = 9
+        MIDDLE_FINGER_PIP = 10
+        MIDDLE_FINGER_TIP = 12
+        PINKY_MCP = 17
+        PINKY_TIP = 20
+
+        # Соединения для рисования скелета руки
+        HAND_CONNECTIONS = [
+            (0,1),(1,2),(2,3),(3,4),
+            (0,5),(5,6),(6,7),(7,8),
+            (5,9),(9,10),(10,11),(11,12),
+            (9,13),(13,14),(14,15),(15,16),
+            (13,17),(17,18),(18,19),(19,20),
+            (0,17)
+        ]
+
+        if result.hand_landmarks:
+            for hand_landmarks in result.hand_landmarks:
+                # Точки
+                for lm in hand_landmarks:
+                    cx, cy = int(lm.x * width), int(lm.y * height)
                     cv2.circle(overlay_buffer, (cx, cy), 5, (255, 0, 0), -1)
 
-                # draw lines
-                self.mpDraw.draw_landmarks(overlay_buffer, handLms, self.mpHands.HAND_CONNECTIONS)
+                # Линии
+                for (a, b) in HAND_CONNECTIONS:
+                    if a < len(hand_landmarks) and b < len(hand_landmarks):
+                        x1 = int(hand_landmarks[a].x * width)
+                        y1 = int(hand_landmarks[a].y * height)
+                        x2 = int(hand_landmarks[b].x * width)
+                        y2 = int(hand_landmarks[b].y * height)
+                        cv2.line(overlay_buffer, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-                target_pos = handLms.landmark[self.mpHands.HandLandmark.INDEX_FINGER_TIP]
-                # print(f"x:{target_pos.x} y:{target_pos.y}")
+                # Трекинг по указательному пальцу
+                target_pos = hand_landmarks[INDEX_FINGER_TIP]
                 if not self.cv_movtion_lock:
-                    distance = self.gimbal_track(center_x, center_y, width*target_pos.x, height*target_pos.y, self.track_faces_iterate)
+                    self.gimbal_track(center_x, center_y,
+                                      width * target_pos.x, height * target_pos.y,
+                                      self.track_faces_iterate)
 
-                # check hand gs
+                # Жесты
                 pinky_finger_gs = self.calculate_angle(
-                                            handLms.landmark[self.mpHands.HandLandmark.WRIST],
-                                            handLms.landmark[self.mpHands.HandLandmark.PINKY_MCP],
-                                            handLms.landmark[self.mpHands.HandLandmark.PINKY_MCP],
-                                            handLms.landmark[self.mpHands.HandLandmark.PINKY_TIP])
+                    hand_landmarks[WRIST], hand_landmarks[PINKY_MCP],
+                    hand_landmarks[PINKY_MCP], hand_landmarks[PINKY_TIP])
 
                 index_finger_gs = self.calculate_angle(
-                                            handLms.landmark[self.mpHands.HandLandmark.INDEX_FINGER_MCP],
-                                            handLms.landmark[self.mpHands.HandLandmark.INDEX_FINGER_PIP],
-                                            handLms.landmark[self.mpHands.HandLandmark.INDEX_FINGER_PIP],
-                                            handLms.landmark[self.mpHands.HandLandmark.INDEX_FINGER_TIP])
+                    hand_landmarks[INDEX_FINGER_MCP], hand_landmarks[INDEX_FINGER_PIP],
+                    hand_landmarks[INDEX_FINGER_PIP], hand_landmarks[INDEX_FINGER_TIP])
 
                 middle_finger_gs = self.calculate_angle(
-                                            handLms.landmark[self.mpHands.HandLandmark.MIDDLE_FINGER_MCP],
-                                            handLms.landmark[self.mpHands.HandLandmark.MIDDLE_FINGER_PIP],
-                                            handLms.landmark[self.mpHands.HandLandmark.MIDDLE_FINGER_PIP],
-                                            handLms.landmark[self.mpHands.HandLandmark.MIDDLE_FINGER_TIP])
+                    hand_landmarks[MIDDLE_FINGER_MCP], hand_landmarks[MIDDLE_FINGER_PIP],
+                    hand_landmarks[MIDDLE_FINGER_PIP], hand_landmarks[MIDDLE_FINGER_TIP])
 
                 # LED Ctrl
                 if middle_finger_gs > 20 and pinky_finger_gs > 90:
-                    cv2.putText(overlay_buffer, ' GS: LED Ctrl', (center_x+50, center_y+100), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-                    tips_distance = self.calculate_distance(handLms.landmark[self.mpHands.HandLandmark.INDEX_FINGER_TIP],
-                        handLms.landmark[self.mpHands.HandLandmark.THUMB_TIP])
-
+                    cv2.putText(overlay_buffer, ' GS: LED Ctrl', (center_x+50, center_y+100),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
+                    tips_distance = self.calculate_distance(
+                        hand_landmarks[INDEX_FINGER_TIP], hand_landmarks[THUMB_TIP])
                     if index_finger_gs < 3:
                         self.max_distance = tips_distance
-                    # print(index_finger_gs)
-
                     get_pwm = int(self.map_value(tips_distance, 0.01, self.max_distance, 0, 128))
                     self.base_ctrl.lights_ctrl(get_pwm, get_pwm)
 
-                    # try:
-                    #     print(f"dis:{tips_distance} max:{self.max_distance} pwm:{get_pwm}")
-                    # except Exception as e:
-                    #     print(e)
-
                 # Take Pic
                 elif middle_finger_gs < 10 and pinky_finger_gs > 90 and index_finger_gs < 10:
-                    cv2.putText(overlay_buffer, ' GS: Take Pic', (center_x+50, center_y+100), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
+                    cv2.putText(overlay_buffer, ' GS: Take Pic', (center_x+50, center_y+100),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
                     if time.time() - self.gs_pic_last_time > self.gs_pic_interval:
                         self.base_ctrl.lights_ctrl(255, 255)
                         time.sleep(0.01)
@@ -1169,16 +1280,16 @@ class OpencvFuncs():
 
                 # Not Found
                 else:
-                    cv2.putText(overlay_buffer, ' GS: Not Defined', (center_x+50, center_y+100), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
+                    cv2.putText(overlay_buffer, ' GS: Not Defined', (center_x+50, center_y+100),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
                     self.base_ctrl.lights_ctrl(0, 0)
 
-        cv2.putText(overlay_buffer, 'ITERATE: {}'.format(self.track_faces_iterate), (center_x+50, center_y+140), 
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(overlay_buffer, ' SPD_R: {}'.format(self.track_spd_rate), (center_x+50, center_y+160), 
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(overlay_buffer, ' ACC_R: {}'.format(self.track_acc_rate), (center_x+50, center_y+180), 
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(overlay_buffer, 'ITERATE: {}'.format(self.track_faces_iterate), (center_x+50, center_y+140),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(overlay_buffer, ' SPD_R: {}'.format(self.track_spd_rate), (center_x+50, center_y+160),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(overlay_buffer, ' ACC_R: {}'.format(self.track_acc_rate), (center_x+50, center_y+180),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
         self.overlay = overlay_buffer
 

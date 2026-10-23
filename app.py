@@ -59,6 +59,7 @@ pcs = set()
 # Camera funcs
 cvf = cv_ctrl.OpencvFuncs(thisPath, base)
 
+
 # Graceful shutdown handler for systemd (SIGTERM) and Ctrl+C (SIGINT)
 def cleanup_handler(signum, frame):
     print(f"[app] Received signal {signum}, cleaning up...", flush=True)
@@ -93,6 +94,8 @@ cmd_actions = {
     f['code']['vid_sta']: lambda: cvf.video_record(True),
     f['code']['vid_end']: lambda: cvf.video_record(False),
     f['code']['cam_toggle']: cvf.toggle_camera_mode,
+    f['code']['cam_1080']: lambda: cvf.set_camera_mode(1920, 1080),
+    f['code']['cam_720']: lambda: cvf.set_camera_mode(1280, 720),
 
     f['code']['cv_none']: lambda: cvf.set_cv_mode(f['code']['cv_none']),
     f['code']['cv_moti']: lambda: cvf.set_cv_mode(f['code']['cv_moti']),
@@ -478,9 +481,18 @@ def handle_command():
             import json
             cmd_json = json.loads(command[8:])  # "base -c " = 8 символов
             t_value = cmd_json.get('T')
+            
+            # PT стабилизатор (T:137)
+            if t_value == f['cmd_config']['cmd_gimbal_steady']:
+                pt_stabilizer.handle_steady_command(cmd_json)
+                print(f"[handle_command] PT stabilizer: s={cmd_json.get('s')}, y={cmd_json.get('y')}")
+            
+            print(f"[handle_command] t_value={t_value!r} (type={type(t_value).__name__}), keys={list(cmd_actions.keys())[:5]}...")
             if t_value in cmd_actions:
                 cmd_actions[t_value]()
                 print(f"[handle_command] Local cmd_action executed for T={t_value}")
+            else:
+                print(f"[handle_command] T={t_value} NOT in cmd_actions")
     except Exception as e:
         print(f"[handle_command] Local cmd_action error: {e}")
     

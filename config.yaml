@@ -2,11 +2,15 @@ args_config:
   arm_default_e: 60
   arm_default_r: 0
   arm_default_z: 24
-  max_rate: 0.9
-  max_speed: 0.5
-  mid_rate: 0.7
-  min_rate: 0.55
-  slow_speed: 0.15
+  max_rate: 1.0
+  max_speed: 1.3
+  mid_rate: 0.66
+  min_rate: 0.3
+  slow_speed: 0.2
+  pt_p_gain: 7.0
+  pt_filter_alpha: 0.5
+  pt_servo_spd: 3000
+  pt_servo_acc: 0
 audio_config:
   audio_output: true
   default_volume: 1.0
@@ -51,6 +55,8 @@ code:
   mc_unlo: 10502
   mid_res: 10102
   cam_toggle: 10107
+  cam_1080: 10108
+  cam_720: 10109
   min_res: 10103
   mp_face: 10308
   mp_hand: 10306

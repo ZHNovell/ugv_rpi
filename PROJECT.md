@@ -488,6 +488,14 @@ cd /root/ugv_rpi/yolo26/
 
 **Итог:** YOLO11_pose работает на NPU A733 через **второй NPU-сервер** (`npu_pose_server`, сокет `/tmp/npu_pose.sock`). **Заменяет MediaPipe Pose** (который не работает на A733). Кнопка **MP POSE** в веб-интерфейсе теперь использует **NPU-инференс**.
 
+### MediaPipe на Orange Pi 4 Pro (2026-10-23)
+
+MediaPipe 0.10.14 собран из исходников под aarch64 + Python 3.13.
+Wheel: https://github.com/ZHNovell/ugv_rpi/releases/tag/mediapipe-0.10.14-aarch64
+Проверено: hand landmarker (2 руки, 21 landmark).
+HAND GS (T:10306) теперь работает через MediaPipe.
+
+
 ### Что нового
 
 1. **YOLO11_pose INT8 (uint8)** сконвертирована в `.nb` (7 МБ).
@@ -597,6 +605,34 @@ WantedBy=multi-user.target
 - Автозапуск — npu-server.service, npu-pose-server.service.
 
 - .nb в /dev/shm — prepare_shm.sh.
+
+### MediaPipe на Orange Pi 4 Pro (2026-10-23)
+
+MediaPipe 0.10.14 собран из исходников под aarch64 + Python 3.13 (Debian 13, glibc 2.41).
+
+**Wheel:** https://github.com/ZHNovell/ugv_rpi/releases/tag/mediapipe-0.10.14-aarch64
+
+**Проверено:** hand landmarker (2 руки, 21 landmark).
+
+**HAND GS (T:10306)** теперь работает через MediaPipe.
+
+**Особенности сборки:**
+
+- Bazel 7.7.0 (Bazelisk), `protoc` 25.3.
+- `rules_java` 7.12.5 (в `bazel_dep` и `single_version_override`).
+- `aspect_rules_rollup` 2.0.1.
+- `WITH_OPENEXR=OFF`, `WITH_FFMPEG=OFF`, `WITH_CAROTENE=OFF`, `BUILD_opencv_apps=OFF`.
+- Убраны `audio_transcriber` и `text_to_speech` из `MEDIAPIPE_TASKS_C_AUDIO_DEPS`.
+- Исключён `MEDIAPIPE_TASKS_C_RETRIEVAL_DEPS` (проблемные SQLite-библиотеки).
+- `target("dotprod")` → `target("+dotprod")` в LiteRT.
+- Симлинк `libOpenCL.so → libOpenCL.so.1` (ICD Loader).
+- `import mediapipe.tasks.python as tasks` → `import mediapipe.tasks as tasks` в `__init__.py` (внутри wheel).
+
+**Установка:**
+
+```
+pip3 install --break-system-packages --ignore-installed --force-reinstall https://github.com/ZHNovell/ugv_rpi/releases/download/mediapipe-0.10.14-aarch64/mediapipe-0.10.14.dev0-cp313-cp313-linux_aarch64.whl
+```
 
 ## 🔧 Адаптация кода `ugv_rpi`
 

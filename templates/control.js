@@ -845,6 +845,14 @@ function toggleCameraMode() {
     }
 }
 
+function sendStop() {
+    // Отправляем команду напрямую в base_json_ctrl (через UART)
+    fetch('/api/stop', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => console.log('STOP sent:', data))
+        .catch(error => console.error('Error:', error));
+}
+
 function sendCommand(command) {
     fetch('/send_command', {
         method: 'POST',

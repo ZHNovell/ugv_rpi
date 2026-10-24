@@ -1079,3 +1079,9 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
         margin: 40px auto;
     }
 }
+/* STOP button active animation */
+.stop_btn:active {
+    transform: scale(0.95);
+    background-color: #cc0000 !important;
+    box-shadow: 0 0 10px #ff4444;
+}

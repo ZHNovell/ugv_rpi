@@ -502,6 +502,16 @@ def handle_command():
         print(f"[app.handle_command] error: {e}")
     return jsonify({"status": "success", "message": "Command received"})
 
+@app.route('/api/stop', methods=['POST'])
+def api_stop():
+    try:
+        base.base_json_ctrl({"T": 0})
+        print("[api_stop] Emergency stop sent")
+        return jsonify({"status": "success"})
+    except Exception as e:
+        print(f"[api_stop] error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route('/getAudioFiles', methods=['GET'])
 def get_audio_files():
     files = [f for f in os.listdir(UPLOAD_FOLDER) if os.path.isfile(os.path.join(UPLOAD_FOLDER, f)) and (f.endswith('.mp3') or f.endswith('.wav'))]

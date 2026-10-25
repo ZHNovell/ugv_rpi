@@ -43,8 +43,9 @@ with open(thisPath + '/config.yaml', 'r') as yaml_file:
 
 class OpencvFuncs():
     """docstring for OpencvFuncs"""
-    def __init__(self, project_path, base_ctrl):
+    def __init__(self, project_path, base_ctrl, emit_osd_ptz=None):
         self.base_ctrl = base_ctrl
+        self.emit_osd_ptz = emit_osd_ptz
         self.cv_event = threading.Event()
         self.cv_event.clear()
         self.cv_frame_counter = 0
@@ -94,6 +95,8 @@ class OpencvFuncs():
         self.gst_stream = None
         self.camera_mode = '1080p30'  # current camera mode
         self._motion_pause_until = 0  # ignore motion frames while servo moves
+        self._last_pose_gesture = None  # 'follow', 'hold', or None
+        self._pose_gesture_start_time = 0  # when current gesture started
         self._last_motion_target = None  # (x, y) previous target
         self._dead_zone = 60  # pixels around center where we don't move
         self.overlay = None
@@ -178,6 +181,7 @@ class OpencvFuncs():
         # MediaPipe Tasks API (0.10.x) — старый mp.solutions удалён.
         # HAND GS: HandLandmarker из tasks API.
         self.hand_landmarker = None
+        self.face_landmarker = None
         self.object_detector = None
         if MEDIAPIPE_AVAILABLE:
             try:
@@ -193,6 +197,22 @@ class OpencvFuncs():
                     )
                     self.hand_landmarker = vision.HandLandmarker.create_from_options(options)
                     print("[cv_ctrl] HandLandmarker (Tasks API) initialized", flush=True)
+                
+                # Face Landmarker для MP FACE
+                face_model_path = thisPath + '/models/face_landmarker.task'
+                if os.path.exists(face_model_path):
+                    face_base_options = mp_python.BaseOptions(model_asset_path=face_model_path)
+                    face_options = vision.FaceLandmarkerOptions(
+                        base_options=face_base_options,
+                        running_mode=vision.RunningMode.IMAGE,
+                        num_faces=1,
+                        output_face_blendshapes=False,
+                        output_facial_transformation_matrixes=True
+                    )
+                    self.face_landmarker = vision.FaceLandmarker.create_from_options(face_options)
+                    print("[cv_ctrl] FaceLandmarker (MP FACE) initialized", flush=True)
+                else:
+                    print(f"[cv_ctrl] face_landmarker.task not found: {face_model_path}", flush=True)
                 
                 # Object Detector для Motion
                 obj_model_path = thisPath + '/models/efficientdet_lite2.tflite'
@@ -773,6 +793,16 @@ class OpencvFuncs():
     def set_cv_mode(self, input_mode):
         prev_mode = self.cv_mode
         self.cv_mode = input_mode
+        
+        # Автоподъём PT на 15 градусов для режимов, где нужен человек
+        if input_mode in (f['code']['mp_pose'], f['code']['mp_face'], f['code']['mp_hand']):
+            try:
+                self.base_ctrl.base_json_ctrl({"T": 133, "X": 0, "Y": 15, "SPD": 0, "ACC": 0})
+                if self.emit_osd_ptz: self.emit_osd_ptz(0, 15)
+                time.sleep(0.5)  # ждём, пока серва доедет
+                print(f"[cv_ctrl] PT auto-tilt to 15 deg for mode {input_mode}", flush=True)
+            except Exception as e:
+                print(f"[cv_ctrl] PT auto-tilt error: {e}", flush=True)
         if self.cv_mode == f['code']['cv_none']:
             self.set_video_record_flag = False
 
@@ -1293,6 +1323,88 @@ class OpencvFuncs():
 
         self.overlay = overlay_buffer
 
+    def mp_detect_face(self, img):
+        if not MEDIAPIPE_AVAILABLE or self.face_landmarker is None:
+            return
+        if img.shape[1] > 640:
+            img = cv2.resize(img, (640, 480), interpolation=cv2.INTER_AREA)
+        
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
+        
+        if time.time() < getattr(self, '_face_pause_until', 0):
+            return
+        
+        try:
+            result = self.face_landmarker.detect(mp_image)
+        except Exception as e:
+            print(f"[mp_detect_face] detect error: {e}", flush=True)
+            return
+        
+        overlay_buffer = np.zeros_like(img_rgb)
+        
+        if result.face_landmarks:
+            # Рисуем точки лица (для визуализации)
+            for landmarks in result.face_landmarks:
+                for lm in landmarks[::10]:  # каждую 10-ю точку, чтобы не грузить
+                    x = int(lm.x * img.shape[1])
+                    y = int(lm.y * img.shape[0])
+                    cv2.circle(overlay_buffer, (x, y), 1, (0, 255, 0), -1)
+            
+            # Вычисляем углы из матрицы трансформации
+            if result.facial_transformation_matrixes:
+                matrix = result.facial_transformation_matrixes[0]
+                pitch = math.degrees(math.atan2(-matrix[2][0], math.sqrt(matrix[0][0]**2 + matrix[1][0]**2)))
+                yaw = math.degrees(math.atan2(matrix[1][0], matrix[0][0]))
+
+                gesture = None
+                # Вычисляем изменения углов
+                dyaw = abs(yaw - getattr(self, '_last_face_yaw', yaw))
+                dpitch = abs(pitch - getattr(self, '_last_face_pitch', pitch))
+                
+                # Кивок: сильное изменение Yaw (>3) и заметное изменение Pitch (>2)
+                if dyaw > 3 and dpitch > 2:
+                    gesture = 'nod'
+                # Поворот: сильное изменение Pitch (>10), Yaw не должен сильно меняться (<8)
+                elif dpitch > 10 and dyaw < 8:
+                    gesture = 'turn'
+
+                if gesture:
+                    # Пауза СРАЗУ, чтобы камера не успела сдвинуться
+                    self._face_pause_until = time.time() + 3.0
+                    
+                    # Двойное моргание IO5
+                    self.base_ctrl.lights_ctrl(255, 255)
+                    time.sleep(0.3)
+                    self.base_ctrl.lights_ctrl(0, 0)
+                    time.sleep(0.3)
+                    self.base_ctrl.lights_ctrl(255, 255)
+                    time.sleep(0.3)
+                    self.base_ctrl.lights_ctrl(0, 0)
+
+                    if gesture == 'nod':
+                        # Кивок: PT вниз-вверх (с возвратом)
+                        self.base_ctrl.base_json_ctrl({"T": 133, "X": 0, "Y": 15, "SPD": 0, "ACC": 0})
+                        time.sleep(0.5)
+                        self.base_ctrl.base_json_ctrl({"T": 133, "X": 0, "Y": 0, "SPD": 0, "ACC": 0})
+                    elif gesture == 'turn':
+                        # Поворот: меньше угол (15) и с возвратом
+                        direction = 1 if yaw > 0 else -1
+                        self.base_ctrl.base_json_ctrl({"T": 133, "X": 15 * direction, "Y": 0, "SPD": 0, "ACC": 0})
+                        time.sleep(0.5)
+                        # Возвращаем PT обратно
+                        self.base_ctrl.base_json_ctrl({"T": 133, "X": 0, "Y": 0, "SPD": 0, "ACC": 0})
+
+                # Запоминаем последние углы
+                self._last_face_pitch = pitch
+                self._last_face_yaw = yaw
+                
+                # Выводим углы на экран (для отладки)
+                cv2.putText(overlay_buffer, f"Pitch: {pitch:.1f}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                cv2.putText(overlay_buffer, f"Yaw: {yaw:.1f}", (50, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+        
+        self.overlay = overlay_buffer
+
     def cv_auto_drive(self, img):
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
@@ -1471,6 +1583,48 @@ class OpencvFuncs():
                     x0, y0, x1, y1 = det['bbox']
                     x0, y0, x1, y1 = int(round(x0)), int(round(y0)), int(round(x1)), int(round(y1))
                     label = f"{det['class']}: {det['confidence']*100:.0f}%"
+                    
+                    # Адаптивный подъём PT по мере приближения (ступенчатый)
+                    bbox_height = y1 - y0
+                    frame_height = frame.shape[0]
+                    ratio = bbox_height / frame_height
+                    print(f"[pose] ratio={ratio:.2f}", flush=True)
+                    
+                    # Определяем целевой угол в зависимости от близости
+                    target_y = None
+                    # Если PT только что двигался, пропускаем (чтобы не мотало)
+                    if time.time() < getattr(self, '_pt_pause_until', 0):
+                        cv2.rectangle(overlay_buffer, (x0, y0), (x1, y1), (0, 255, 0), 2)
+                        continue
+
+                    if ratio > 0.85:
+                        target_y = 25
+                    elif ratio > 0.75:
+                        target_y = 22.5
+                    elif ratio > 0.65:
+                        target_y = 20
+                    elif ratio > 0.6:
+                        target_y = 17.5
+                    else:
+                        target_y = 15
+                    
+                    # Если человек отошел (ratio < 0.3), опускаем PT до 15 (базовый)
+                    if ratio < 0.3:
+                        target_y = 15
+                    
+                    current_y = getattr(self, '_last_pt_y', 15)  # базовый угол 15
+                    
+                    if target_y is not None:
+                        # Подъём: только если новый угол больше текущего
+                        # Опускание: только если target_y == 15 (отошел)
+                        if target_y > current_y or (target_y == 15 and current_y > 15):
+                            self._last_pt_y = target_y
+                            self.base_ctrl.base_json_ctrl({"T": 133, "X": 0, "Y": target_y, "SPD": 0, "ACC": 0})
+                            if self.emit_osd_ptz:
+                                self.emit_osd_ptz(0, target_y)
+                            print(f"[pose] PT adjusted to {target_y} deg (ratio={ratio:.2f})", flush=True)
+                            # Пауза, чтобы камера успокоилась
+                            self._pt_pause_until = time.time() + 2.0
                     cv2.rectangle(overlay_buffer, (x0, y0), (x1, y1), (0, 255, 0), 2)
                     y = y0 - 10 if y0 - 10 > 10 else y0 + 20
                     cv2.putText(overlay_buffer, label, (x0, y),
@@ -1493,6 +1647,74 @@ class OpencvFuncs():
                                          (int(kpa[0]), int(kpa[1])),
                                          (int(kpb[0]), int(kpb[1])),
                                          (0, 255, 255), 2)
+                        
+                        # === Анализ угла локтя (правая рука: 6-8-10) ===
+                        # Проверяем, что все 3 точки видны (prob > 0.3)
+                        print(f"[pose] kps len={len(kps)}, right: shoulder=({kps[6][0]:.0f},{kps[6][1]:.0f}) elbow=({kps[8][0]:.0f},{kps[8][1]:.0f}) wrist=({kps[10][0]:.0f},{kps[10][1]:.0f})", flush=True)
+                        if kps[6][2] > 0.3 and kps[8][2] > 0.3 and kps[10][2] > 0.3:
+                            # Векторы: плечо->локоть и локоть->запястье
+                            v1 = (kps[8][0] - kps[6][0], kps[8][1] - kps[6][1])
+                            v2 = (kps[10][0] - kps[8][0], kps[10][1] - kps[8][1])
+                            # Угол между векторами
+                            dot = v1[0]*v2[0] + v1[1]*v2[1]
+                            mag1 = math.sqrt(v1[0]**2 + v1[1]**2)
+                            mag2 = math.sqrt(v2[0]**2 + v2[1]**2)
+                            if mag1 > 0 and mag2 > 0:
+                                cos_angle = dot / (mag1 * mag2)
+                                cos_angle = max(-1.0, min(1.0, cos_angle))  # clamp
+                                angle_deg = math.degrees(math.acos(cos_angle))
+                                
+                                # Определяем жест
+                                gesture = None
+                                if angle_deg < 30:
+                                    gesture = 'follow'
+                                elif angle_deg > 60:
+                                    gesture = 'hold'
+                                
+                                # Логика с задержкой 1 секунда (команда отправляется постоянно)
+                                if gesture is not None:
+                                    if gesture == self._last_pose_gesture:
+                                        # Жест продолжается, проверяем время
+                                        if self._pose_gesture_start_time > 0 and (time.time() - self._pose_gesture_start_time >= 1.0):
+                                            # Сработало! Отправляем команду КАЖДЫЙ КАДР, пока жест удерживается
+                                            if gesture == 'follow':
+                                                # Подруливание по центру человека (по тазу)
+                                                # Берем центр таза: точка 11 (левое бедро) и 12 (правое бедро)
+                                                if kps[11][2] > 0.3 and kps[12][2] > 0.3:
+                                                    cx_person = (kps[11][0] + kps[12][0]) / 2
+                                                    cx_frame = frame.shape[1] / 2
+                                                    # Смещение: >0 если человек правее центра
+                                                    offset = (cx_frame - cx_person) / cx_frame  # инвертируем (зеркало)
+                                                    # Ограничиваем
+                                                    offset = max(-1.0, min(1.0, offset))
+                                                    # Подруливание: если человек правее, правый мотор быстрее
+                                                    # Коэффициент 0.5 (резче), но не даём уйти в минус
+                                                    base_speed = 0.3
+                                                    turn_amount = offset * 0.5
+                                                    left_speed = base_speed - turn_amount
+                                                    right_speed = base_speed + turn_amount
+                                                    # Ограничиваем: не меньше 0.05 (чтобы ехать вперёд, а не крутиться)
+                                                    left_speed = max(0.05, min(0.8, left_speed))
+                                                    right_speed = max(0.05, min(0.8, right_speed))
+                                                    self.base_ctrl.base_json_ctrl({"T": 1, "L": left_speed, "R": right_speed})
+                                                else:
+                                                    # Если таз не виден, едем прямо
+                                                    self.base_ctrl.base_json_ctrl({"T": 1, "L": 0.3, "R": 0.3})
+                                                cv2.putText(overlay_buffer, 'FOLLOW', (50, 100),
+                                                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                                            elif gesture == 'hold':
+                                                self.base_ctrl.base_json_ctrl({"T": 1, "L": 0, "R": 0})
+                                                cv2.putText(overlay_buffer, 'HOLD', (50, 100),
+                                                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                                            # НЕ сбрасываем таймер, чтобы продолжать отправлять
+                                    else:
+                                        # Новый жест, запоминаем время
+                                        self._last_pose_gesture = gesture
+                                        self._pose_gesture_start_time = time.time()
+                                else:
+                                    # Нет жеста (мертвая зона), сбрасываем
+                                    self._last_pose_gesture = None
+                                    self._pose_gesture_start_time = 0
 
                 self.overlay = overlay_buffer
             except Exception as e:
@@ -1813,7 +2035,7 @@ class OpencvFuncs():
             f['code']['cv_clor']: self.cv_detect_color,
             f['code']['mp_hand']: self.mp_detect_hand,
             f['code']['cv_auto']: self.cv_auto_drive,
-            f['code']['mp_face']: self.mediaPipe_faces,
+            f['code']['mp_face']: self.mp_detect_face,
             f['code']['mp_pose']: self.mediaPipe_pose,
             f['code']['cv_seg']: self.cv_detect_seg,
             f['code']['cv_depth']: self.cv_detect_depth,

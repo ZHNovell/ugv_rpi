@@ -1085,3 +1085,31 @@ ul.video-list li a:hover div .normal_btn_play::before{background-image: url('./i
     background-color: #cc0000 !important;
     box-shadow: 0 0 10px #ff4444;
 }
+
+/* Мигание для критического заряда */
+@keyframes blink-red {
+    0% { color: #ff4444; }
+    50% { color: #ffffff; }
+    100% { color: #ff4444; }
+}
+.critical-battery {
+    animation: blink-red 1s infinite;
+    font-weight: bold;
+}
+
+/* Зеленый (норма) */
+.ok-battery { color: #4FF5C0; font-weight: normal; }
+/* Желтый (предупреждение) */
+.warning-battery { color: #ffcc00; font-weight: bold; }
+/* Оранжевый (критическое предупреждение) */
+.orange-battery { color: #ff8800; font-weight: bold; }
+/* Красный (авария) + мигание */
+@keyframes blink-red {
+    0% { color: #ff4444; }
+    50% { color: #ffffff; }
+    100% { color: #ff4444; }
+}
+.critical-battery {
+    animation: blink-red 1s infinite;
+    font-weight: bold;
+}

@@ -8,6 +8,17 @@ import yaml, os
 # Orange Pi 4 Pro — UART7
 base = BaseController('/dev/ttyUSB0', 115200)
 
+# Автоматический сброс PT в среднее положение (Ahead) при старте
+try:
+    import time
+    time.sleep(2)  # ждём инициализации ESP32
+    base.base_json_ctrl({"T": 133, "X": 0, "Y": 0, "SPD": 0, "ACC": 0})
+    emit_osd_ptz(0, 0)
+    time.sleep(0.5)
+    print("[app] PT auto-ahead sent")
+except Exception as e:
+    print(f"[app] PT auto-ahead error: {e}")
+
 threading.Thread(target=lambda: base.breath_light(15), daemon=True).start()
 
 # config file.
@@ -47,6 +58,12 @@ app = Flask(__name__)
 # log.disabled = True
 socketio = SocketIO(app)
 
+def emit_osd_ptz(pan, tilt):
+    try:
+        socketio.emit('osd_ptz', {'pan': pan, 'tilt': tilt}, namespace='/ctrl')
+    except Exception as e:
+        print(f"[emit_osd_ptz] error: {e}")
+
 # Set to keep track of RTCPeerConnection instances
 active_pcs = {}
 
@@ -57,7 +74,7 @@ MAX_CONNECTIONS = 1
 pcs = set()
 
 # Camera funcs
-cvf = cv_ctrl.OpencvFuncs(thisPath, base)
+cvf = cv_ctrl.OpencvFuncs(thisPath, base, emit_osd_ptz)
 
 
 # Graceful shutdown handler for systemd (SIGTERM) and Ctrl+C (SIGINT)

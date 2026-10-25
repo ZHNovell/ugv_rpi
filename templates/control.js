@@ -609,6 +609,35 @@ socket.emit('request_data');
 
 var light_mode = 0;
 var cv_heartbeat_stop_flag = false;
+socket.on('osd_ptz', function(data) {
+    try {
+        var x_cmd = data.pan || 0;
+        var y_cmd = data.tilt || 0;
+        
+        var RotateAngle = document.getElementById("Pan").innerHTML = x_cmd.toFixed(2);
+        var panScale = document.getElementById("pan_scale");
+        if (panScale) panScale.style.transform = `rotate(${-RotateAngle}deg)`;
+        
+        var tiltNum = document.getElementById("Tilt");
+        if (tiltNum) {
+            var tiltNumPanel = tiltNum.getBoundingClientRect();
+            var tiltNumMove = tiltNum.innerHTML = y_cmd.toFixed(2);
+            
+            var pointer = document.getElementById('tilt_scale_pointer');
+            var tiltScaleOut = document.getElementById('tilt_scale');
+            if (pointer && tiltScaleOut) {
+                var tiltScaleBase = tiltScaleOut.getBoundingClientRect();
+                var tiltScalediv = document.getElementById('tilt_scalediv');
+                var tiltScaleDivBase = tiltScalediv.getBoundingClientRect();
+                var pointerMoveY = tiltScaleBase.height/135;
+                pointer.style.transform = `translate(${tiltScaleDivBase.width}px, ${pointerMoveY*(90 - tiltNumMove)-tiltNumPanel.height/2}px)`;
+            }
+        }
+    } catch (e) {
+        console.log("osd_ptz error:", e);
+    }
+});
+
 socket.on('update', function(data) {
     // Убрана проверка base_voltage — она блокировала OSD без ESP32
     try {
@@ -766,19 +795,34 @@ socket.on('update', function(data) {
         document.getElementById("photos-size").innerHTML = data[picture_size] + " MB";
         document.getElementById("videos-size").innerHTML = data[video_size] + " MB";
 
-        document.getElementById("v_in").innerHTML = (data[base_voltage]).toFixed(1);
+
+        var v_in_el = document.getElementById("v_in");
+        v_in_el.innerHTML = (data[base_voltage]).toFixed(1);
+        var battery_block = v_in_el.parentElement;
+        var v = data[base_voltage];
         
-        var element = document.getElementById("b_state");
-        element.classList.remove("baterry_state", "baterry_state1", "baterry_state2", "baterry_state3");
-        if ((data[base_voltage]) >= 10.5) {
-            element.classList.add("baterry_state");
-        } else if ((data[base_voltage]) >= 10) {
-            element.classList.add("baterry_state","baterry_state3");
-        } else if ((data[base_voltage]) >= 9.5) {
-            element.classList.add("baterry_state","baterry_state2");
-        } else if ((data[base_voltage]) < 9.5) {
-            element.classList.add("baterry_state","baterry_state1");
+        // Очищаем старые классы
+        battery_block.classList.remove("critical-battery", "warning-battery", "orange-battery", "ok-battery");
+        var icon_el = document.getElementById("b_state");
+        
+        if (v < 10.2) {
+            // 🔴 Критический (< 10.2V): красный + мигание, иконка 1 деление
+            battery_block.classList.add("critical-battery");
+            icon_el.className = "baterry_state baterry_state1";
+        } else if (v < 10.8) {
+            // 🟠 Оранжевый (10.2V - 10.8V): иконка 2 деления
+            battery_block.classList.add("orange-battery");
+            icon_el.className = "baterry_state baterry_state2";
+        } else if (v < 11.0) {
+            // 🟡 Желтый (10.8V - 11.0V): иконка 3 деления
+            battery_block.classList.add("warning-battery");
+            icon_el.className = "baterry_state baterry_state3";
+        } else {
+            // 🟢 Норма (>= 11.0V): зеленый, иконка полная
+            battery_block.classList.add("ok-battery");
+            icon_el.className = "baterry_state";
         }
+
     } catch(e) {
         console.log(e);
     }

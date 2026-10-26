@@ -142,16 +142,16 @@
                                 ontouchend="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});"></li>
                                 
                                 <li class="ctl9_base_btn4" 
-                                onmousedown="cmdJsonCmd({'T':cmd_movition_ctrl,'L':-max_speed,'R':max_speed});" 
-                                ontouchstart="cmdJsonCmd({'T':cmd_movition_ctrl,'L':-max_speed,'R':max_speed});" 
+                                onmousedown="turnLeft();" 
+                                ontouchstart="turnLeft();" 
                                 onmouseup="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});" 
                                 ontouchend="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});"></li>
                                 
                                 <li class="ctl9_base_btn"></li>
                                 
                                 <li class="ctl9_base_btn6" 
-                                onmousedown="cmdJsonCmd({'T':cmd_movition_ctrl,'L':max_speed,'R':-max_speed});" 
-                                ontouchstart="cmdJsonCmd({'T':cmd_movition_ctrl,'L':max_speed,'R':-max_speed});" 
+                                onmousedown="turnRight();" 
+                                ontouchstart="turnRight();" 
                                 onmouseup="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});" 
                                 ontouchend="cmdJsonCmd({'T':cmd_movition_ctrl,'L':0,'R':0});"></li>
                                 
@@ -336,7 +336,7 @@
         <div style="background-image: url('./img/grey/delete.svg');"></div>
     </footer>
     <!-- <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script> -->
-    <script src="./control.js?v=8"></script>
+    <script src="./control.js?v=26"></script>
     <script src="./main.js"></script>
 </body>
 </html>

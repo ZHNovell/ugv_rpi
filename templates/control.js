@@ -1,4 +1,4 @@
-var robot_name, cmd_movition_ctrl, max_speed, max_turn_speed, slow_speed;
+var robot_name, cmd_movition_ctrl, max_speed, slow_speed;
 var cmd_gimbal_ctrl, cmd_gimbal_steady, cmd_arm_ctrl_ui;
 var max_rate, mid_rate, min_rate, default_rate, arm_default_e, arm_default_r, arm_default_z; 
 var max_res, mid_res, min_res; 
@@ -29,7 +29,6 @@ fetch('/config')
       cmd_arm_ctrl_ui = yamlObject.cmd_config.cmd_arm_ctrl_ui;
 
       max_speed = yamlObject.args_config.max_speed;
-      max_turn_speed = yamlObject.args_config.max_turn_speed;
       slow_speed = yamlObject.args_config.slow_speed;
       robot_name = yamlObject.base_config.robot_name;
 
@@ -916,12 +915,10 @@ function sendCommand(command) {
 }
 
 function cmdJsonCmd(jsonData){
+    console.log(jsonData);
     if (jsonData.T == cmd_movition_ctrl) {
-        console.log('[T:1]', jsonData.L, jsonData.R);
         heartbeat_left = jsonData.L;
         heartbeat_right = jsonData.R;
-    } else {
-        console.log('[cmd]', jsonData.T);
     }
     socketJson.emit('json', jsonData);
 }
@@ -1023,27 +1020,6 @@ var move_buttons = {
     left: 0,
     right: 0,
 }
-function turnBoostRate(rate) {
-    if (rate <= 0.33) return 0.80;   // Slow -> 0.80
-    if (rate <= 0.66) return 0.90;   // Middle -> 0.90
-    return 1.0;                      // Fast -> 1.0
-}
-function turnRate(rate) {
-    return 1.0;   // Всегда полная мощь — иначе без энкодеров не разворачивается
-}
-
-function turnLeft() {
-    const boost = turnBoostRate(speed_rate);
-    sendCommand('base -c {"T":138,"L":' + boost + ',"R":' + boost + '}');
-    const turnPwm = max_turn_speed * turnRate(speed_rate);
-    cmdJsonCmd({'T':cmd_movition_ctrl,'L':-turnPwm,'R':turnPwm});
-}
-function turnRight() {
-    const boost = turnBoostRate(speed_rate);
-    sendCommand('base -c {"T":138,"L":' + boost + ',"R":' + boost + '}');
-    const turnPwm = max_turn_speed * turnRate(speed_rate);
-    cmdJsonCmd({'T':cmd_movition_ctrl,'L':turnPwm,'R':-turnPwm});
-}
 function moveProcess() {
     var forwardButton  = move_buttons.forward;
     var backwardButton = move_buttons.backward;
@@ -1071,6 +1047,8 @@ function moveProcess() {
         } else if (speed_rate >= 0.66) {
             spdbuttons[2].classList.add("ctl_btn_active");
         }
+    } else {
+        speedCtrl(defaultSpeed);
     }
 
     // Movtion Ctrl
@@ -1084,37 +1062,23 @@ function moveProcess() {
         heartbeat_left  = -max_speed;
         heartbeat_right = -max_speed;
     }else if (forwardButton == 0 && backwardButton == 0 && leftButton == 1 && rightButton == 0){
-        const boost = turnBoostRate(speed_rate);
-        sendCommand('base -c {"T":138,"L":' + boost + ',"R":' + boost + '}');
-        const turnPwm = max_turn_speed * turnRate(speed_rate);
-        heartbeat_left  = -turnPwm;
-        heartbeat_right =  turnPwm;
+        heartbeat_left  = -max_speed;
+        heartbeat_right =  max_speed;
     }else if (forwardButton == 0 && backwardButton == 0 && leftButton == 0 && rightButton == 1){
-        const boost = turnBoostRate(speed_rate);
-        sendCommand('base -c {"T":138,"L":' + boost + ',"R":' + boost + '}');
-        const turnPwm = max_turn_speed * turnRate(speed_rate);
-        heartbeat_left  =  turnPwm;
-        heartbeat_right = -turnPwm;
+        heartbeat_left  =  max_speed;
+        heartbeat_right = -max_speed;
     }else if (forwardButton == 1 && backwardButton == 0 && leftButton == 1 && rightButton == 0){
-        if (speed_rate <= 0.33) { heartbeat_left = 0.17; heartbeat_right = 2.0; }
-        else { heartbeat_left = slow_speed; heartbeat_right = max_speed; }
+        heartbeat_left  =  slow_speed;
+        heartbeat_right =  max_speed;
     }else if (forwardButton == 1 && backwardButton == 0 && leftButton == 0 && rightButton == 1){
-        if (speed_rate <= 0.33) { heartbeat_left = 2.0; heartbeat_right = 0.17; }
-        else { heartbeat_left = max_speed; heartbeat_right = slow_speed; }
+        heartbeat_left  =  max_speed;
+        heartbeat_right =  slow_speed;
     }else if (forwardButton == 0 && backwardButton == 1 && leftButton == 1 && rightButton == 0){
-        if (speed_rate <= 0.33) { heartbeat_left = -0.17; heartbeat_right = -2.0; }
-        else { heartbeat_left = -slow_speed; heartbeat_right = -max_speed; }
+        heartbeat_left  = -slow_speed;
+        heartbeat_right = -max_speed;
     }else if (forwardButton == 0 && backwardButton == 1 && leftButton == 0 && rightButton == 1){
-        if (speed_rate <= 0.33) { heartbeat_left = -2.0; heartbeat_right = -0.17; }
-        else { heartbeat_left = -max_speed; heartbeat_right = -slow_speed; }
-    }
-
-    // T:138 строго ДО T:1. Поворот (A/D) -> 0.8/0.9, прямо -> speed_rate. Чистый разворот не трогаем.
-    const isTurning = (leftButton == 1 || rightButton == 1);
-    const isPureTurn = (forwardButton == 0 && backwardButton == 0 && isTurning);
-    if (!isPureTurn) {
-        const rate = (isTurning && speed_rate <= 0.66) ? turnBoostRate(speed_rate) : speed_rate;
-        cmdJsonCmd({"T":138,"L":rate,"R":rate});
+        heartbeat_left  = -max_speed;
+        heartbeat_right = -slow_speed;
     }
 
     cmdJsonCmd({'T':cmd_movition_ctrl,'L':heartbeat_left,'R':heartbeat_right});
@@ -1233,7 +1197,6 @@ document.onkeydown = function (event) {
         updateButton(key, 1);
         cmdProcess();
     } else if (moveKey && move_buttons[moveKey] === 0) {
-        console.log('[keydown]', moveKey, '-> 1');
         updateMoveButton(moveKey, 1);
         moveProcess();
     }
@@ -1249,7 +1212,6 @@ document.onkeyup = function (event) {
         updateButton(key, 0);
         cmdProcess();
     } else if (moveKey && move_buttons[moveKey] === 1) {
-        console.log('[keyup]', moveKey, '-> 0');
         updateMoveButton(moveKey, 0);
         moveProcess();
     }

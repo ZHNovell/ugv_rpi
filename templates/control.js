@@ -112,10 +112,7 @@ fetch('/config')
         document.title = robot_name + " WEB CTRL";
       }
       
-      // Подсветить кнопку Speed Ctrl по значению default_rate из config
-      if (typeof default_rate !== 'undefined' && default_rate !== null) {
-        highlightSpeedButton(default_rate);
-      }
+
     } catch (e) {
       console.error('Error parsing YAML file:', e);
     }
@@ -919,55 +916,24 @@ function cmdJsonCmd(jsonData){
     if (jsonData.T == cmd_movition_ctrl) {
         heartbeat_left = jsonData.L;
         heartbeat_right = jsonData.R;
+        jsonData.L = heartbeat_left * speed_rate;
+        jsonData.R = heartbeat_right * speed_rate;
     }
     socketJson.emit('json', jsonData);
 }
 
-function speedCtrl(inputSpd, buttonIndex){
+function speedCtrl(inputSpd){
     speed_rate = inputSpd;
     defaultSpeed = speed_rate;
-    if (typeof buttonIndex !== 'undefined') {
-        highlightSpeedButtonByIndex(buttonIndex);
-    } else {
-        highlightSpeedButton(speed_rate);
-    }
-    // Отправляем команду в UART
-    sendCommand('base -c {"T":138,"L":' + speed_rate + ',"R":' + speed_rate + '}');
-}
-
-// Подсветка по индексу кнопки
-function highlightSpeedButtonByIndex(index) {
     var spdCtrlBtn = document.getElementById("speed_ctrl_btn");
-    if (!spdCtrlBtn) return;
     var spdbuttons = spdCtrlBtn.getElementsByTagName("button");
     removeButtonsClass(spdbuttons);
-    if (spdbuttons[index]) {
-        spdbuttons[index].classList.add("ctl_btn_active");
-    }
-}
-
-// Подсветка кнопки Speed Ctrl по ближайшему значению
-function highlightSpeedButton(rate) {
-    if (typeof min_rate === 'undefined' || typeof mid_rate === 'undefined' || typeof max_rate === 'undefined') {
-        return;
-    }
-    var spdCtrlBtn = document.getElementById("speed_ctrl_btn");
-    if (!spdCtrlBtn) return;
-    var spdbuttons = spdCtrlBtn.getElementsByTagName("button");
-    removeButtonsClass(spdbuttons);
-    
-    var rates = [min_rate, mid_rate, max_rate];
-    var closest = 0;
-    var minDiff = Math.abs(rate - rates[0]);
-    for (var i = 1; i < rates.length; i++) {
-        var diff = Math.abs(rate - rates[i]);
-        if (diff < minDiff) {
-            minDiff = diff;
-            closest = i;
-        }
-    }
-    if (spdbuttons[closest]) {
-        spdbuttons[closest].classList.add("ctl_btn_active");
+    if (speed_rate <= 0.30) {
+        spdbuttons[0].classList.add("ctl_btn_active");
+    } else if (speed_rate > 0.30 && speed_rate < 0.70) {
+        spdbuttons[1].classList.add("ctl_btn_active");
+    } else if (speed_rate >= 0.70) {
+        spdbuttons[2].classList.add("ctl_btn_active");
     }
 }
 

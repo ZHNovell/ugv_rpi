@@ -1,12 +1,17 @@
 # import base_ctrl library
 from base_ctrl import BaseController
+from controllers.joy_ctrl import JoystickReader, JoyTeleop
 import threading
 import signal
 import sys
 import yaml, os
 
 # Orange Pi 4 Pro — UART7
-base = BaseController('/dev/ttyUSB0', 115200)
+try:
+    base = BaseController('/dev/ttyACM0', 115200)
+except Exception as e:
+    print(f"[app] BaseController init error: {e}")
+    base = None
 
 # Автоматический сброс PT в среднее положение (Ahead) при старте
 try:
@@ -590,7 +595,7 @@ def update_data_websocket_single():
             f['fb']['detect_react']:cvf.detection_reaction_mode,
             f['fb']['pan_angle']:   cvf.pan_angle,
             f['fb']['tilt_angle']:  cvf.tilt_angle,
-            f['fb'][f'base_voltage']:base.base_data['v'] if base.base_data else 0,
+            f['fb'][f'base_voltage']:base.base_data.get('v', 0) if base.base_data else 0,
             f['fb']['video_fps']:   cvf.video_fps,
             f['fb']['cv_movtion_mode']: cvf.cv_movtion_lock,
             f['fb']['base_light']:  base.base_light_status,
@@ -629,6 +634,12 @@ def base_data_loop():
     sensor_read_time = time.time()
     while True:
         cvf.update_base_data(base.feedback_data())
+        # arm state (только для module_type != 2, т.е. не PT)
+        if f['base_config']['module_type'] != 2:
+            base.base_json_ctrl({"T":105})
+            data = base.feedback_data()
+            if data is not None and data.get('T') == 1051:
+                socketio.emit('arm_state_update', data, namespace='/arm_state_update')
 
         # get sensor data
         if base.extra_sensor:
@@ -678,6 +689,25 @@ def cmd_on_boot():
 
 
 # Run the Flask app
+
+class JoyCtrlThread(threading.Thread):
+    def __init__(self):
+        super().__init__()
+        self.daemon = True
+        self.js_reader = JoystickReader()
+        self.js_reader.start()
+        self.joy_ctrl = JoyTeleop(self.js_reader, base.ser.port if base else '/dev/ttyACM0')
+        self.running = True
+
+    def run(self):
+        while self.running:
+            if self.js_reader.Joy_active:
+                self.joy_ctrl.handle_events()
+            time.sleep(0.05)
+
+    def stop(self):
+        self.running = False
+
 if __name__ == "__main__":
     # lights off
     base.lights_ctrl(255, 255)
@@ -709,4 +739,11 @@ if __name__ == "__main__":
     cmd_on_boot()
 
     # run the main web app
+    # joy_ctrl
+    try:
+        joy_thread = JoyCtrlThread()
+        joy_thread.start()
+    except Exception as e:
+        print(f"[app] JoyCtrlThread error: {e}")
+
     socketio.run(app, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)

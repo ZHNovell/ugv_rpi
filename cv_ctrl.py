@@ -41,6 +41,70 @@ with open(thisPath + '/config.yaml', 'r') as yaml_file:
     f = yaml.safe_load(yaml_file)
 
 
+
+
+# ============================================================
+# Утилиты для autodrive / color tracking (из рефакторинга Waveshare)
+# ============================================================
+from enum import Enum
+
+class TrackState(Enum):
+    FOLLOW = 0
+    SEARCH_SPIN = 1
+    RECOVER = 2
+
+
+def angle_diff(a, b):
+    return (a - b + math.pi) % (2 * math.pi) - math.pi
+
+
+def robust_mean_remove_outliers(arr, mz_thresh=3.5, is_angle=False):
+    """Устойчивое среднее с отсечением выбросов по MAD (median absolute deviation)."""
+    if arr.size == 0:
+        return 0.0
+    med = np.median(arr)
+    mad = np.median(np.abs(arr - med))
+    if mad == 0:
+        return float(np.mean(arr))
+    mod_z = 0.6745 * (arr - med) / mad
+    filtered = arr[np.abs(mod_z) <= mz_thresh]
+    return float(np.mean(filtered)) if filtered.size > 0 else float(np.mean(arr))
+
+
+class PID:
+    """Классический PID с анти-windup через tolerance (dead-zone)."""
+    def __init__(self, kp, ki, kd, output_limits, tolerance):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.integral = 0.0
+        self.prev_error = 0.0
+        self.prev_time = None
+        self.output_limits = output_limits
+        self.tolerance = tolerance
+
+    def compute(self, setpoint, measurement):
+        error = setpoint - measurement
+        if abs(error) <= self.tolerance:
+            self.integral = 0.0
+            self.prev_error = 0.0
+            self.prev_time = time.time()
+            return 0.0
+        now = time.time()
+        dt = 0.0 if self.prev_time is None else now - self.prev_time
+        self.integral += error * dt
+        derivative = 0.0 if dt == 0 else (error - self.prev_error) / dt
+        output = self.kp * error + self.ki * self.integral + self.kd * derivative
+        output = max(self.output_limits[0], min(self.output_limits[1], output))
+        self.prev_error = error
+        self.prev_time = now
+        return output
+
+# ============================================================
+# Конец блока утилит
+# ============================================================
+
+
 class OpencvFuncs():
     """docstring for OpencvFuncs"""
     def __init__(self, project_path, base_ctrl, emit_osd_ptz=None):
@@ -253,8 +317,8 @@ class OpencvFuncs():
         self.speed_impact = 0.5
         self.line_track_speed = 0.3
         self.slope_on_speed = 0.1
-        self.line_lower = np.array([25, 150, 70])
-        self.line_upper = np.array([42, 255, 255])
+        self.line_lower = np.array([15, 70, 100])
+        self.line_upper = np.array([45, 255, 255])
 
         # base data
         self.show_base_info_flag = False
@@ -274,6 +338,49 @@ class OpencvFuncs():
 
         # osd settings
         self.add_osd = f['base_config']['add_osd']
+
+        # ============================================================
+        # FSM autodrive (из рефакторинга Waveshare)
+        # ============================================================
+        self.state = TrackState.FOLLOW
+        self.yaw_buffer = deque(maxlen=10)
+        self.last_error = 0.0
+        self.kp = 2.0
+        self.kd = 0.05
+        self.line_track_speed = 0.15
+
+        # ROI для поиска линии: (y1, y2, x1, x2, weight)
+        # Зависят от module_type (0/2 — PT, 1/3 — Arm)
+        _module_type = f['base_config']['module_type']
+        if _module_type in (0, 2):
+            self.roi = [
+                (250, 300, 0, 640, 0.1),   # дальняя треть, весь экран по ширине
+                (300, 400, 0, 640, 0.3),   # средняя треть
+                (400, 480, 0, 640, 0.6),   # ближняя треть (самая важная)
+            ]
+        else:
+            self.roi = [
+                (150, 200, 40, 600, 0.2),
+                (200, 250, 40, 600, 0.3),
+                (250, 300, 40, 600, 0.5),
+            ]
+
+        # SEARCH_SPIN
+        self.search_start_time = 0.0
+        self.scan_dir = -1
+        self.scan_yaw_base = 0.5
+        self.scan_yaw_max = 3.1416
+        self.max_scan_time = 10.0
+
+        # RECOVER
+        self.recover_start_time = 0.0
+        self.recover_time = 0.4
+
+        # ============================================================
+
+        # Размеры для CV-обработки (стандарт Waveshare — 640x480)
+        self.base_width = 640
+        self.base_height = 480
 
         # camera type detection
         self.usb_camera_connected = self.usb_camera_detection()
@@ -681,33 +788,40 @@ class OpencvFuncs():
 
 
     def osd_render(self, osd_frame):
+        """Отрисовка лидара и сенсоров на кадре (адаптировано под размер кадра)."""
         if not self.add_osd:
             return osd_frame
-        
-        # add your osd info here
-        # cv2.putText(overlay_buffer, 'OSD_TEST', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-        # render lidar data
-        lidar_points = []
-        for lidar_angle, lidar_distance in zip(self.base_ctrl.rl.lidar_angles_show, self.base_ctrl.rl.lidar_distances_show):
-            lidar_x = int(lidar_distance * np.cos(lidar_angle) * 0.05) + 320
-            lidar_y = int(lidar_distance * np.sin(lidar_angle) * 0.05) + 240
-            lidar_points.append((lidar_x, lidar_y))
+        h, w = osd_frame.shape[:2]
+        cx = w // 2
+        cy = h // 2
 
-        for lidar_point in lidar_points:
-            cv2.circle(osd_frame, lidar_point, 3, (255, 0, 0), -1)
+        # Масштаб: 1 м = 20 px (0.05), можно регулировать
+        scale = f['args_config'].get('autodrive_lidar_scale', 0.10)
 
-        # render sensor data
+        # Рисуем точки лидара (0x54 пакеты, LD19/STL-19P)
+        for lidar_angle, lidar_distance in zip(
+            self.base_ctrl.rl.lidar_angles_show,
+            self.base_ctrl.rl.lidar_distances_show
+        ):
+            if lidar_distance <= 0 or lidar_distance > 12000:
+                continue
+            lidar_x = int(lidar_distance * np.cos(lidar_angle) * scale) + cx
+            lidar_y = int(lidar_distance * np.sin(lidar_angle) * scale) + cy
+            # Отсекаем, если за пределами кадра
+            if 0 <= lidar_x < w and 0 <= lidar_y < h:
+                cv2.circle(osd_frame, (lidar_x, lidar_y), 3, (255, 0, 0), -1)
+
+        # Рисуем сенсоры (если extra_sensor: true)
         sensor_index = 0
         for sensor_line in self.base_ctrl.rl.sensor_data:
-            # sensor_line = sensor_line[:-2]
-            cv2.putText(osd_frame, sensor_line,
-                        (100, 50 + sensor_index * 20), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
-            sensor_index = sensor_index + 1
-
+            cv2.putText(osd_frame, str(sensor_line),
+                        (100, 50 + sensor_index * 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            sensor_index += 1
 
         return osd_frame
+
 
     def picture_capture(self):
         self.picture_capture_flag = True
@@ -799,10 +913,27 @@ class OpencvFuncs():
             try:
                 self.base_ctrl.base_json_ctrl({"T": 133, "X": 0, "Y": 15, "SPD": 0, "ACC": 0})
                 if self.emit_osd_ptz: self.emit_osd_ptz(0, 15)
-                time.sleep(0.5)  # ждём, пока серва доедет
+                time.sleep(0.5)
                 print(f"[cv_ctrl] PT auto-tilt to 15 deg for mode {input_mode}", flush=True)
             except Exception as e:
                 print(f"[cv_ctrl] PT auto-tilt error: {e}", flush=True)
+        elif input_mode == f['code']['cv_auto']:
+            # AUTODRIVE: опускаем PT вниз на -20°, чтобы видеть линию на полу
+            try:
+                self.base_ctrl.base_json_ctrl({"T": 133, "X": 0, "Y": -20, "SPD": 0, "ACC": 0})
+                if self.emit_osd_ptz: self.emit_osd_ptz(0, -20)
+                time.sleep(0.5)
+                print(f"[cv_ctrl] PT auto-tilt to -20 deg for AUTODRIVE", flush=True)
+            except Exception as e:
+                print(f"[cv_ctrl] PT auto-tilt AUTODRIVE error: {e}", flush=True)
+                # Свет при AUTODRIVE (IO5 = PT, IO4 = шасси)
+                try:
+                    io5 = f['args_config'].get('autodrive_light_io5', 200)
+                    io4 = f['args_config'].get('autodrive_light_io4', 0)
+                    self.base_ctrl.lights_ctrl(io4, io5)
+                    print(f"[cv_ctrl] AUTODRIVE light: IO4={io4} IO5={io5}", flush=True)
+                except Exception as e:
+                    print(f"[cv_ctrl] AUTODRIVE light error: {e}", flush=True)
         if self.cv_mode == f['code']['cv_none']:
             self.set_video_record_flag = False
 
@@ -835,6 +966,21 @@ class OpencvFuncs():
             self._start_aruco_worker()
         elif prev_mode == f['code']['cv_aruco']:
             self._stop_aruco_worker()
+
+        # Выход из AUTODRIVE: выключить свет
+        if prev_mode == f['code']['cv_auto'] and self.cv_mode != f['code']['cv_auto']:
+            try:
+                self.base_ctrl.lights_ctrl(0, 0)
+                print(f"[cv_ctrl] AUTODRIVE exit: lights off", flush=True)
+            except Exception as e:
+                print(f"[cv_ctrl] AUTODRIVE exit light error: {e}", flush=True)
+            try:
+                # PT -> Ahead (X=0, Y=0)
+                self.base_ctrl.base_json_ctrl({"T": 133, "X": 0, "Y": 0, "SPD": 0, "ACC": 0})
+                if self.emit_osd_ptz: self.emit_osd_ptz(0, 0)
+                print(f"[cv_ctrl] AUTODRIVE exit: PT -> Ahead", flush=True)
+            except Exception as e:
+                print(f"[cv_ctrl] AUTODRIVE exit PT error: {e}", flush=True)
 
     def set_detection_reaction(self, input_reaction):
         self.detection_reaction_mode = input_reaction
@@ -1406,116 +1552,192 @@ class OpencvFuncs():
         self.overlay = overlay_buffer
 
     def cv_auto_drive(self, img):
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-
-        # get a sampling
-        height, width = img.shape[:2]
-        center_x, center_y = width // 2, height // 2
-        mask_sampling = np.zeros((height, width), dtype=np.uint8)
-        cv2.circle(mask_sampling, (center_x, center_y), int(self.sampling_rad/4), (255), thickness=-1)
-        masked_hsv = cv2.bitwise_and(hsv, hsv, mask=mask_sampling)
-        masked_hsv_pixels = masked_hsv[mask_sampling == 255]
-        lower_hsv = np.min(masked_hsv_pixels, axis=0)
-        upper_hsv = np.max(masked_hsv_pixels, axis=0)
-
-        # select the line color & get the mask
-        # img = cv2.GaussianBlur(img, (11, 11), 0)
-        line_mask = cv2.inRange(hsv, self.line_lower, self.line_upper)
-        line_mask = cv2.erode(line_mask, None, iterations=2)
-        line_mask = cv2.dilate(line_mask, None, iterations=2)
-
-        sampling_h1 = int(height * self.sampling_line_1)
-        sampling_h2 = int(height * self.sampling_line_2)
-
-        get_sampling_1 = line_mask[sampling_h1]
-        get_sampling_2 = line_mask[sampling_h2]
-
-        sampling_width_1 = np.sum(get_sampling_1 == 255)
-        sampling_width_2 = np.sum(get_sampling_2 == 255)
-
-        if sampling_width_1:
-            sam_1 = True
-        else:
-            sam_1 = False
-        if sampling_width_2:
-            sam_2 = True
-        else:
-            sam_2 = False
-
-        line_index_1 = np.where(get_sampling_1 == 255)
-        line_index_2 = np.where(get_sampling_2 == 255)
-
-        if sam_1:
-            sampling_1_left  = line_index_1[0][0]
-            sampling_1_right = line_index_1[0][sampling_width_1 - 1]
-            sampling_1_center= int((sampling_1_left + sampling_1_right) / 2)
-        if sam_2:
-            sampling_2_left  = line_index_2[0][0]
-            sampling_2_right = line_index_2[0][sampling_width_2 - 1]
-            sampling_2_center= int((sampling_2_left + sampling_2_right) / 2)
-
-        line_slope = 0
-        input_speed = 0
-        input_turning = 0
-        if sam_1 and sam_2:
-            line_slope = (sampling_1_center - sampling_2_center) / abs(sampling_h1 - sampling_h2)
-            impact_by_slope = self.slope_on_speed * abs(line_slope)
-            # if impact_by_slope > input_speed:
-            #     impact_by_slope = input_speed
-            input_speed = self.line_track_speed - impact_by_slope
-            # print(f'im_by_slope:{impact_by_slope}   input_speed:{input_speed}')
-            input_turning = -(line_slope * self.slope_impact + (sampling_2_center - center_x) * self.base_impact) #+ (speed_impact * input_speed)
-        elif not sam_1 and sam_2:
-            input_speed = 0
-            input_turning = (sampling_2_center - center_x) * self.base_impact
-        elif sam_1 and not sam_2:
-            input_speed = (self.line_track_speed / 3)
-            input_turning = 0
-        else:
-            input_speed = - (self.line_track_speed / 3)
-            input_turning = 0
-
-        # input_turning = - line_slope * slope_impact
-        # try:
-        #     input_turning = -(sampling_2_center - center_x) * base_impact
-        # except:
-        #     pass
-        if not self.cv_movtion_lock:
-            self.base_ctrl.base_json_ctrl({"T":13,"X":input_speed,"Z":input_turning})
-
+        """FSM autodrive: FOLLOW → SEARCH_SPIN → RECOVER (из рефакторинга Waveshare)."""
         overlay_buffer = np.zeros_like(img)
-        overlay_buffer = cv2.cvtColor(line_mask, cv2.COLOR_GRAY2BGR)
+        height, width = img.shape[:2]
+        img_small = cv2.resize(img, (self.base_width, self.base_height))
 
-        cv2.putText(overlay_buffer, 'Line Following', (100, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-        cv2.circle(overlay_buffer, (center_x, center_y), int(self.sampling_rad/4), (64, 255, 64), 1)
+        cx = self.base_width // 2
 
-        cv2.putText(overlay_buffer, ' SAM_H1: {}'.format(self.sampling_line_1), (center_x-150, sampling_h1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-        cv2.putText(overlay_buffer, ' SAM_H2: {}'.format(self.sampling_line_2), (center_x-150, sampling_h2-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
+        img_small_blur = cv2.GaussianBlur(img_small, (5, 5), 0)
+        hsv = cv2.cvtColor(img_small_blur, cv2.COLOR_BGR2HSV)
 
-        cv2.putText(overlay_buffer, f'X: {input_speed:.2f}, Z: {input_turning:.2f}', (center_x+50, center_y+0), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        weight_sum = 0
+        cx_sum = 0
+        has_line = False
 
-        cv2.putText(overlay_buffer, ' UPPER: {}'.format(upper_hsv), (center_x+50, center_y+40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(overlay_buffer, ' LOWER: {}'.format(lower_hsv), (center_x+50, center_y+60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        input_speed = 0.0
+        input_turning = 0.0
 
-        cv2.putText(overlay_buffer, ' UPPER: {}'.format(self.line_upper), (center_x+50, center_y+100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-        cv2.putText(overlay_buffer, ' LOWER: {}'.format(self.line_lower), (center_x+50, center_y+120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-        cv2.putText(overlay_buffer, f' SLOPE: {line_slope:.2f}', (center_x+50, center_y+140), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-        cv2.putText(overlay_buffer, f' SAM_1 SAM_2 SLOPE_IM BASE_IM SPD_IM LT_SPD SLOPE_SPD', (center_x-250, center_y-70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
-        cv2.putText(overlay_buffer, f' {self.sampling_line_1:.2f}   {self.sampling_line_2:.2f}   {self.slope_impact:.2f}      {self.base_impact:.4f}  {self.speed_impact:.2f}    {self.line_track_speed:.2f}    {self.slope_on_speed:.2f}', (center_x-250, center_y-50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 128, 128), 1)
+        for (y1, y2, x1, x2, wt) in self.roi:
+            crop = hsv[y1:y2, x1:x2]
+            mask = cv2.inRange(crop, self.line_lower, self.line_upper)
+            cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not cnts:
+                continue
 
-        cv2.line(overlay_buffer, (0, sampling_h1), (width, sampling_h1), (255, 0, 0), 2)
-        cv2.line(overlay_buffer, (0, sampling_h2), (width, sampling_h2), (255, 0, 0), 2)
+            c = max(cnts, key=cv2.contourArea)
+            area = cv2.contourArea(c)
+            if area < 50:
+                continue
 
-        if sam_1:
-            cv2.line(overlay_buffer, (sampling_1_left, sampling_h1+20), (sampling_1_left, sampling_h1-20), (0, 255, 0), 2)
-            cv2.line(overlay_buffer, (sampling_1_right, sampling_h1+20), (sampling_1_right, sampling_h1-20), (0, 255, 0), 2)
-        if sam_2:
-            cv2.line(overlay_buffer, (sampling_2_left, sampling_h2+20), (sampling_2_left, sampling_h2-20), (0, 255, 0), 2)
-            cv2.line(overlay_buffer, (sampling_2_right, sampling_h2+20), (sampling_2_right, sampling_h2-20), (0, 255, 0), 2)
-        if sam_1 and sam_2:
-            cv2.line(overlay_buffer, (sampling_1_center, sampling_h1), (sampling_2_center, sampling_h2), (255, 0, 0), 2)
+            # Фильтр по форме: линия узкая и длинная
+            rect = cv2.minAreaRect(c)
+            (rw, rh) = rect[1]
+            if rw < 1 or rh < 1:
+                continue
+            aspect = max(rw, rh) / min(rw, rh)
+            # Линия: aspect > 3 (длинная), площадь заполнения > 0.5
+            # Дверь: aspect ~1 (квадратная) или площадь >> (заполнение < 0.5)
+            fill_ratio = area / (rw * rh)
+            if aspect < 3.5 or fill_ratio < 0.6:
+                continue
 
+            c = c.astype(np.float32)
+            c[:, :, 0] += x1
+            c[:, :, 1] += y1
+
+            # Контур уже в координатах 640x480 (после resize). Сжатие не нужно.
+
+            c = c.astype(np.int32)
+
+            # Рисуем контур в overlay_buffer (масштабируем обратно в реальный размер)
+            c_draw = c.copy().astype(np.float32)
+            # c_draw: контур в 640x480, масштабируем обратно в реальный размер (1920x1080)
+            # Но в ROI crop мы уже прибавили x1, y1. Значит нужно просто умножить на (width / base_width)
+            c_draw[:, :, 0] *= (width / self.base_width)
+            c_draw[:, :, 1] *= (height / self.base_height)
+            c_draw = c_draw.astype(np.int32)
+            cv2.drawContours(overlay_buffer, [c_draw], -1, (0, 0, 255), 3)
+
+            (x, y), _, _ = cv2.minAreaRect(c)
+            cx_sum += x * wt
+            weight_sum += wt
+            has_line = True
+
+        # Отладка: рисуем ROI
+        if f['args_config'].get('autodrive_debug', False):
+            for (y1, y2, x1, x2, wt) in self.roi:
+                ry1 = int(y1 * height / self.base_height)
+                ry2 = int(y2 * height / self.base_height)
+                rx1 = int(x1 * width / self.base_width)
+                rx2 = int(x2 * width / self.base_width)
+                cv2.rectangle(overlay_buffer, (rx1, ry1), (rx2, ry2), (0, 255, 255), 1)
+                cv2.putText(overlay_buffer, f"w={wt:.1f}", (rx1 + 5, ry1 + 15),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+
+        if self.state == TrackState.FOLLOW:
+            if has_line and weight_sum > 0:
+                self._lost_frames = 0  # сбрасываем счетчик потери
+                x = cx_sum / weight_sum
+                err = (x - cx) / cx
+
+                self.yaw_buffer.append(err)
+                err_f = robust_mean_remove_outliers(np.array(self.yaw_buffer))
+
+                d = err_f - self.last_error
+                self.last_error = err_f
+
+                z = self.kp * err_f + self.kd * d
+
+                input_speed = self.line_track_speed
+                input_turning = -z  # возвращаем как было
+                input_turning = max(-0.8, min(0.8, input_turning))
+            else:
+                # Линия не найдена. Но если она была только что (last_error != 0), 
+                # даем еще 1 кадр прощения (едем прямо), чтобы не дергаться
+                if abs(self.last_error) > 0.01 and getattr(self, '_lost_frames', 0) < 2:
+                    self._lost_frames = getattr(self, '_lost_frames', 0) + 1
+                    input_speed = self.line_track_speed
+                    input_turning = 0.0
+                else:
+                    self.state = TrackState.SEARCH_SPIN
+                    self.search_start_time = time.time()
+                    self.scan_dir = 1 if self.last_error > 0 else -1
+                    input_speed = 0.0
+                    input_turning = 0.0
+                    self._lost_frames = 0
+
+        elif self.state == TrackState.SEARCH_SPIN:
+            if has_line and weight_sum > 0:
+                self.state = TrackState.RECOVER
+                self.recover_start_time = time.time()
+                self.last_error = 0.0
+                self.yaw_buffer.clear()
+                input_speed = 0.0
+                input_turning = 0.0
+            else:
+                dt = time.time() - self.search_start_time
+                yaw = max(self.scan_yaw_max * (1 - dt / self.max_scan_time), self.scan_yaw_base)
+                input_speed = 0.0
+                input_turning = self.scan_dir * yaw
+
+        elif self.state == TrackState.RECOVER:
+            dt = time.time() - self.recover_start_time
+            if has_line:
+                if weight_sum > 0:
+                    x = cx_sum / weight_sum
+                else:
+                    x = cx // 2
+
+                err = (x - cx) / cx
+                z = 0.5 * self.kp * err
+
+                input_speed = 0.0
+                input_turning = -z
+
+                if dt > self.recover_time:
+                    self.state = TrackState.FOLLOW
+                    self.last_error = 0.0
+                    self.yaw_buffer.clear()
+            else:
+                self.state = TrackState.SEARCH_SPIN
+                self.search_start_time = time.time()
+                self.scan_dir = 1 if self.last_error > 0 else -1
+                input_speed = 0.0
+                input_turning = self.scan_dir * self.scan_yaw_base
+
+        # Лидарная защита: стоп, если препятствие < порога
+        lidar_stop_mm = f['args_config'].get('autodrive_lidar_stop_mm', 150)
+        lidar_ignore_back_deg = f['args_config'].get('autodrive_lidar_ignore_back_deg', 30)
+        min_dist = None
+        if self.base_ctrl.use_lidar and self.base_ctrl.rl.lidar_distances_show:
+            import math as _math
+            for ang, dist in zip(self.base_ctrl.rl.lidar_angles_show, self.base_ctrl.rl.lidar_distances_show):
+                if dist <= 0:
+                    continue
+                # Угол в градусах (0..360)
+                deg = (_math.degrees(ang)) % 360
+                # PT находится на 90° (сзади). Игнорируем сектор 90° ± ignore_back_deg
+                diff = abs(deg - 90)
+                if diff > 180:
+                    diff = 360 - diff
+                if diff <= lidar_ignore_back_deg:
+                    continue
+                if min_dist is None or dist < min_dist:
+                    min_dist = dist
+            if min_dist is not None and min_dist < lidar_stop_mm:
+                input_speed = 0.0
+                input_turning = 0.0
+                cv2.putText(overlay_buffer, f'LIDAR STOP: {min_dist:.0f} mm',
+                            (50, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            elif min_dist is not None:
+                cv2.putText(overlay_buffer, f'LIDAR min(fwd): {min_dist:.0f} mm',
+                            (50, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+
+        if not self.cv_movtion_lock:
+            self.base_ctrl.base_json_ctrl({
+                "T": f['cmd_config']['cmd_ros_movition_ctrl'],
+                "X": input_speed,
+                "Z": input_turning,
+            })
+
+        cv2.putText(overlay_buffer, f'State: {self.state.name}', (50, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(overlay_buffer, f'X: {input_speed:.2f}  Z: {input_turning:.2f}',
+                    (50, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         self.overlay = overlay_buffer
+
 
     def mediaPipe_faces(self, img):
         if not MEDIAPIPE_AVAILABLE:

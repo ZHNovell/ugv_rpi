@@ -3,7 +3,8 @@ args_config:
   arm_default_r: 0
   arm_default_z: 24
   max_rate: 1.0
-  max_speed: 1.3
+  max_speed: 0.5
+  max_turn_speed: 1.5
   mid_rate: 0.66
   min_rate: 0.3
   slow_speed: 0.2
@@ -11,25 +12,33 @@ args_config:
   pt_filter_alpha: 0.5
   pt_servo_spd: 3000
   pt_servo_acc: 0
+  autodrive_lidar_stop_mm: 100
+  autodrive_light_io5: 200
+  autodrive_light_io4: 0
+  autodrive_lidar_scale: 0.1
+  autodrive_debug: true
+  autodrive_lidar_ignore_back_deg: 90
 audio_config:
   audio_output: true
   default_volume: 1.0
   min_time_bewteen_play: 1
   speed_rate: 180
 base_config:
-  add_osd: false
+  add_osd: true
   extra_sensor: false
   main_type: 1
   module_type: 2
   robot_name: Orange
   sbc_version: 0.93
-  use_lidar: false
+  use_lidar: true
 cmd_config:
   cmd_arm_ctrl_ui: 144
   cmd_gimbal_base_ctrl: 141
   cmd_gimbal_ctrl: 133
   cmd_gimbal_steady: 137
   cmd_movition_ctrl: 1
+  cmd_ros_movition_ctrl: 13
+  cmd_set_led_pwm: 132
   cmd_pwm_ctrl: 11
   cmd_servo_torque: 210
   cmd_set_servo_id: 501

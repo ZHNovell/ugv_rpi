@@ -28,7 +28,7 @@ class ReadLine:
 		self.sensor_data_max_len = 51
 
 		try:
-			self.lidar_ser = serial.Serial(glob.glob('/dev/ttyACM*')[0], 230400, timeout=1)
+			self.lidar_ser = serial.Serial('/dev/ttyACM1', 230400, timeout=1)  # D500/STL-19P
 			print("/dev/ttyACM* connected succeed")
 		except:
 			self.lidar_ser = None
@@ -125,7 +125,7 @@ class ReadLine:
 			self.lidar_distances.clear()
 		except Exception as e:
 			print(f"[base_ctrl.lidar_data_recv] error: {e}")
-			self.lidar_ser = serial.Serial(glob.glob('/dev/ttyACM*')[0], 230400, timeout=1)
+			self.lidar_ser = serial.Serial('/dev/ttyACM1', 230400, timeout=1)
 
 
 class BaseController:
@@ -158,16 +158,16 @@ class BaseController:
 					try:
 						self.data_buffer = json.loads(part)
 						if 'T' in self.data_buffer:
-							# Ищем телеметрию (T:1001) или данные с 'v'
-							if self.data_buffer.get('T') == 1001 and 'v' in self.data_buffer:
-								self.base_data = self.data_buffer
-								return self.base_data
-							elif self.data_buffer.get('T') == 1003:
-								self.base_data = self.data_buffer
-								print(self.base_data)
-								return self.base_data
+							self.base_data = self.data_buffer
+							self.data_buffer = None
+							if self.base_data['T'] == 1001:
+								v = self.base_data.get('v')
+								if isinstance(v, (int, float)):
+									self.base_voltage_status = v
+							return self.base_data
 					except json.JSONDecodeError:
 						continue
+			self.rl.clear_buffer()
 			return self.base_data
 		except Exception as e:
 			self.rl.clear_buffer()

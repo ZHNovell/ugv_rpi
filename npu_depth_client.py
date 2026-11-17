@@ -16,7 +16,7 @@ import time
 import cv2
 
 
-SOCKET_PATH = "/tmp/npu_depth_raw.sock"
+SOCKET_PATH = "/tmp/npu_depth_axcl.sock"
 
 
 class NPUDepthClient:

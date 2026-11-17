@@ -1,0 +1,16 @@
+# Минимальный конфиг mediamtx для RTSP-сервера (v1.9.0)
+logLevel: info
+logDestinations: [stdout]
+
+# RTSP-сервер
+rtsp: yes
+rtspAddress: :8554
+
+# API (для управления)
+api: yes
+apiAddress: :9997
+
+# Пути
+paths:
+  cam:
+    runOnInitRestart: yes

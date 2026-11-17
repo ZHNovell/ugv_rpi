@@ -114,6 +114,68 @@ class SystemInfo(threading.Thread):
     def resume(self):
         self.__flag.set()
 
+    def get_axcl_info(self):
+        """Парсит axcl-smi и возвращает dict с NPU, памятью и температурой AX-M1."""
+        try:
+            import subprocess
+            import re
+            result = subprocess.check_output(
+                ['axcl-smi'],
+                env={'PATH': '/usr/bin/axcl:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'},
+                timeout=2, stderr=subprocess.DEVNULL
+            ).decode('utf-8', errors='ignore')
+
+            # Парсим строки таблицы:
+            # |    0  AX650N                     V3.6.5 | 0000:01:00.0 |                148 MiB /      945 MiB |
+            # |   --   37C                      -- / -- | 2%        0% |                 18 MiB /     2944 MiB |
+            npu = 0
+            mem_used = 0
+            mem_total = 0
+            cmm_used = 0
+            cmm_total = 0
+            temp = 0
+
+            # Ищем "148 MiB / 945 MiB" (Memory-Usage)
+            m = re.search(r'(\d+)\s+MiB\s*/\s*(\d+)\s+MiB', result)
+            if m:
+                mem_used = int(m.group(1))
+                mem_total = int(m.group(2))
+
+            # Ищем "2% 0%" (CPU NPU)
+            m = re.search(r'(\d+)%\s+(\d+)%', result)
+            if m:
+                npu = int(m.group(2))  # второй процент — NPU
+
+            # Ищем "18 MiB / 2944 MiB" (CMM-Usage)
+            matches = re.findall(r'(\d+)\s+MiB\s*/\s*(\d+)\s+MiB', result)
+            if len(matches) >= 2:
+                cmm_used = int(matches[1][0])
+                cmm_total = int(matches[1][1])
+
+            # Ищем "37C" (Temp)
+            m = re.search(r'(\d+)C', result)
+            if m:
+                temp = int(m.group(1))
+
+            return {
+                'npu': npu,
+                'mem_used': mem_used,
+                'mem_total': mem_total,
+                'cmm_used': cmm_used,
+                'cmm_total': cmm_total,
+                'temp': temp
+            }
+        except Exception as e:
+            # print(f"[get_axcl_info] error: {e}")
+            return {
+                'npu': 0,
+                'mem_used': 0,
+                'mem_total': 0,
+                'cmm_used': 0,
+                'cmm_total': 0,
+                'temp': 0
+            }
+
     def run(self):
         self.end0_ip = self.get_ip_address('end0')
         self.wlan_ip = self.get_ip_address(self.net_interface)

@@ -14,6 +14,7 @@ var s_panid, release, set_mid, s_tilid;
 var armZ, armR, armE;
 
 var detect_type, led_mode, detect_react, picture_size, video_size, cpu_load;
+var axcl_npu, axcl_mem, axcl_temp;
 var cpu_temp, ram_usage, pan_angle, tilt_angle, wifi_rssi, base_voltage, video_fps, camera_mode;
 var cv_movtion_mode, base_light;
 
@@ -105,6 +106,9 @@ fetch('/config')
       base_voltage= yamlObject.fb.base_voltage;
       video_fps   = yamlObject.fb.video_fps;
       camera_mode = yamlObject.fb.camera_mode;
+      axcl_npu = yamlObject.fb.axcl_npu;
+      axcl_mem = yamlObject.fb.axcl_mem;
+      axcl_temp = yamlObject.fb.axcl_temp;
       cv_movtion_mode = yamlObject.fb.cv_movtion_mode;
       base_light  = yamlObject.fb.base_light;
 
@@ -639,6 +643,7 @@ socket.on('osd_ptz', function(data) {
 });
 
 socket.on('update', function(data) {
+    console.log('AXCL DEBUG:', data[axcl_npu], data[axcl_mem], data[axcl_temp]);
     // Убрана проверка base_voltage — она блокировала OSD без ESP32
     try {
         // update camera mode indicator (RES)
@@ -789,6 +794,14 @@ socket.on('update', function(data) {
         document.getElementById("CPU").innerHTML = data[cpu_load] + "%";
         document.getElementById("tem").innerHTML = data[cpu_temp].toFixed(1) + " ℃";
         document.getElementById("RAM").innerHTML = data[ram_usage] + "%";
+
+        // AX-M1 (AXCL)
+        var axNpu = document.getElementById("AX_NPU");
+        if (axNpu && data[axcl_npu] !== undefined) axNpu.innerHTML = data[axcl_npu];
+        var axMem = document.getElementById("AX_MEM");
+        if (axMem && data[axcl_mem] !== undefined) axMem.innerHTML = data[axcl_mem];
+        var axTemp = document.getElementById("AX_TEMP");
+        if (axTemp && data[axcl_temp] !== undefined) axTemp.innerHTML = data[axcl_temp];
         document.getElementById("rssi").innerHTML = data[wifi_rssi] + " dBm";
         document.getElementById("fps").innerHTML = data[video_fps].toFixed(1);
         

@@ -12,10 +12,10 @@ args_config:
   pt_filter_alpha: 0.5
   pt_servo_spd: 3000
   pt_servo_acc: 0
-  autodrive_lidar_stop_mm: 100
-  autodrive_light_io5: 200
-  autodrive_light_io4: 0
-  autodrive_lidar_scale: 0.1
+  autodrive_lidar_stop_mm: 150
+  autodrive_light_io5: 255
+  autodrive_light_io4: 255
+  autodrive_lidar_scale: 0.2
   autodrive_debug: true
   autodrive_lidar_ignore_back_deg: 90
 audio_config:
@@ -118,6 +118,9 @@ fb:
   video_fps: 113
   video_size: 105
   wifi_rssi: 111
+  axcl_npu: 117
+  axcl_mem: 118
+  axcl_temp: 119
 sbc_config:
   disabled_http_log: true
   feedback_interval: 0.001

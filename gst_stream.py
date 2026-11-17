@@ -108,13 +108,14 @@ class GstStream:
     # ---------- pipeline ----------
     def build_pipeline(self):
         pipeline_str = (
-            f"v4l2src device={self.device} ! "
+            f"v4l2src device={self.device} io-mode=dmabuf ! "
             f"image/jpeg,width={self.width},height={self.height},framerate={self.fps}/1 ! "
             f"jpegdec ! tee name=t "
+            # Ветка 1: appsink для Python (превью/детекция)
             f"t. ! queue max-size-buffers=2 leaky=downstream ! "
             f"videoconvert ! video/x-raw,format=BGR ! "
-            f"appsink name=appsink max-buffers=1 drop=true emit-signals=true sync=false"
-        )
+            f"appsink name=appsink max-buffers=1 drop=true emit-signals=true sync=false "
+                    )
         print("[GstStream] Building pipeline (with tee)")
         self.pipeline = Gst.parse_launch(pipeline_str)
         self.appsink = self.pipeline.get_by_name('appsink')
@@ -200,6 +201,7 @@ class GstStream:
             self.rec_queue.set_property("max-size-buffers", 30)
             self.rec_queue.set_property("max-size-bytes", 0)
             self.rec_queue.set_property("max-size-time", 0)
+            self.rec_queue.set_property("leaky", 2)  # 2 = downstream (отбрасывать старые кадры)
             self.rec_convert = Gst.ElementFactory.make("videoconvert", "rec_convert")
             self.rec_scale   = Gst.ElementFactory.make("videoscale", "rec_scale")
             self.rec_caps    = Gst.ElementFactory.make("capsfilter", "rec_caps")
@@ -214,7 +216,6 @@ class GstStream:
 
             # scale to 1280x720 and use I420 for jpegenc (soft encoder)
             caps = Gst.Caps.from_string(
-                f"video/x-raw,format=I420,width=1280,height=720,framerate={self.fps}/1"
             )
             self.rec_caps.set_property("caps", caps)
 

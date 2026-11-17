@@ -582,6 +582,7 @@ def handle_socket_json(json):
 def update_data_websocket_single():
     # {'T':1001,'L':0,'R':0,'r':0,'p':0,'v': 11,'pan':0,'tilt':0}
     try:
+        axcl = si.get_axcl_info()
         socket_data = {
             f['fb']['picture_size']:si.pictures_size,
             f['fb']['video_size']:  si.videos_size,
@@ -599,7 +600,12 @@ def update_data_websocket_single():
             f['fb']['video_fps']:   cvf.video_fps,
             f['fb']['cv_movtion_mode']: cvf.cv_movtion_lock,
             f['fb']['base_light']:  base.base_light_status,
-            f['fb']['camera_mode']: getattr(cvf, 'camera_mode', '1080p30')
+            f['fb']['camera_mode']: getattr(cvf, 'camera_mode', '1080p30'),
+
+            # AX-M1 (AXCL)
+            f['fb']['axcl_npu']:    axcl['npu'],
+            f['fb']['axcl_mem']:    f"{axcl['mem_used']}/{axcl['mem_total']}",
+            f['fb']['axcl_temp']:   axcl['temp']
         }
         socketio.emit('update', socket_data, namespace='/ctrl')
     except Exception as e:

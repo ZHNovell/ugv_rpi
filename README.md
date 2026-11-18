@@ -1,4 +1,5 @@
 # Orange Pi 4 Pro UGV Robot
+[🇷🇺 Русская версия](README.ru.md)
 
 ![GitHub top language](https://img.shields.io/github/languages/top/ZHNovell/ugv_rpi)
 ![GitHub language count](https://img.shields.io/github/languages/count/ZHNovell/ugv_rpi)
@@ -9,45 +10,45 @@
 
 <img width="1088" height="721" alt="UGV Robot" src="https://github.com/user-attachments/assets/368fbf34-2087-4e6b-b819-b5fca5f83acd" />
 
-**UGV-робот** на **Orange Pi 4 Pro** (Allwinner A733, NPU 3 TOPS) с опциональным ускорителем **Radxa AICore AX-M1** (AX650N) и **4 NPU-моделями**: детекция, позы, глубина, сегментация. Работает **автономно** (SPI + NVMe), управляется через **веб-интерфейс**.
-## 📋 Содержание
+**UGV robot** based on **Orange Pi 4 Pro** (Allwinner A733, NPU 3 TOPS) with an optional **Radxa AICore AX-M1** (AX650N) accelerator and **4 NPU models**: detection, pose, depth, segmentation. It runs **autonomously** (SPI + NVMe) and is controlled via a **web interface**.
+## 📋 Table of Contents
 
-1. [Аппаратная платформа](#-аппаратная-платформа)
-2. [Архитектура](#-архитектура)
-3. [Сборка Armbian](#-сборка-armbian)
-4. [Установка ОС](#-установка-ос)
-5. [Носители: eMMC и NVMe](#-носители-emmc-и-nvme)
-6. [CQE-баг eMMC](#-cqe-баг-emmc)
-7. [Настройка интерфейсов](#-настройка-интерфейсов)
-8. [Зависимости](#-зависимости)
+1. [Hardware platform](#-hardware-platform)
+2. [Architecture](#-architecture)
+3. [Building Armbian](#-building-armbian)
+4. [Installing the OS](#-installing-the-os)
+5. [Storage: eMMC and NVMe](#-storage-emmc-and-nvme)
+6. [eMMC CQE bug](#-emmc-cqe-bug)
+7. [Interface setup](#-interface-setup)
+8. [Dependencies](#-dependencies)
 9. [MediaPipe (HAND GS)](#-mediapipe-hand-gs)
-10. [Motion (YOLO26s)](#-motion-object-detection-через-yolo26s-npu)
-11. [MP POSE (Угол локтя)](#-mp-pose-угол-локтя--адаптивный-pt)
-12. [MP FACE (Кивок / Поворот)](#-mp-face-кивок--поворот)
-13. [Emergency Stop](#-emergency-stop-аварийная-остановка)
-14. [NPU-серверы](#-npu-серверы)
-15. [Адаптация кода](#-адаптация-кода)
-16. [Веб-интерфейс](#-веб-интерфейс)
-17. [Автозапуск](#-автозапуск)
-18. [JSON-команды](#-json-команды-esp32)
-19. [USB-камера](#-usb-камера-uvc)
-20. [Запись видео](#-запись-видео)
-21. [Стресс-тесты](#-стресс-тесты)
-22. [История изменений](#-история-изменений)
-23. [Ссылки](#-ссылки)
-## 🔧 Аппаратная платформа
+10. [Motion (Object Detection via YOLO26s NPU)](#-motion-object-detection-via-yolo26s-npu)
+11. [MP POSE (Elbow angle + Adaptive PT)](#-mp-pose-elbow-angle--adaptive-pt)
+12. [MP FACE (Nod / Turn)](#-mp-face-nod--turn)
+13. [Emergency Stop](#-emergency-stop-emergency-stop)
+14. [NPU servers](#-npu-servers)
+15. [Code adaptation](#-code-adaptation)
+16. [Web interface](#-web-interface)
+17. [Autostart](#-autostart)
+18. [JSON commands](#-json-commands-esp32)
+19. [USB camera](#-usb-camera-uvc)
+20. [Video recording](#-video-recording)
+21. [Stress tests](#-stress-tests)
+22. [Changelog](#-changelog)
+23. [Links](#-links)
+## 🔧 Hardware platform
 
-- **Orange Pi 4 Pro** — Allwinner A733, 8 ядер (4×A76 + 4×A55), 12 ГБ RAM, NPU 3 TOPS INT8.
+- **Orange Pi 4 Pro** — Allwinner A733, 8 cores (4×A76 + 4×A55), 12 GB RAM, NPU 3 TOPS INT8.
 - **General Driver for Robots** — Waveshare, ESP32-WROOM-32UE, 2×MX1919, INA219, OLED SSD1306 (0x3C).
-- **2-Axis Pan-Tilt Camera Module** — сервоприводы ST3215, UART.
-- **Шасси WAVE ROVER / UGV Rover** — 4 мотора, 4 энкодера, 3S Li-Ion UPS.
-- **USB-камера** — навигационная (UVC).
-- **CSI-камера** — опционально (обзорная).
-- **Radxa AICore AX-M1** — PCIe-ускоритель на AX650N (опционально, для pose/seg/depth).
+- **2-Axis Pan-Tilt Camera Module** — ST3215 servos, UART.
+- **WAVE ROVER / UGV Rover chassis** — 4 motors, 4 encoders, 3S Li-Ion UPS.
+- **USB camera** — navigation (UVC).
+- **CSI camera** — optional (overview).
+- **Radxa AICore AX-M1** — PCIe accelerator on the AX650N (optional, for pose/seg/depth).
 
-**Распиновка (40-pin):**
+**Pinout (40-pin):**
 
-| Пин Orange Pi | Функция | Пин на General Driver |
+| Orange Pi Pin | Function | General Driver Pin |
 |---|---|---|
 | 8 | UART7 TX | RX (ESP32) |
 | 10 | UART7 RX | TX (ESP32) |
@@ -55,21 +56,21 @@
 | 2, 4 | 5V | 5V |
 | 6, 9, 14... | GND | GND |
 
-**Важно:** OLED, INA219, сервы управляются **ESP32** через **внутренние шины**. Orange Pi их **не трогает**.
+**Important:** OLED, INA219, and the servos are controlled by the **ESP32** via **internal buses**. Orange Pi does **not touch** them.
 
-## 📋 Архитектура
+## 📋 Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                     Orange Pi 4 Pro                     │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
 │  │  app.py     │  │ cv_ctrl.py  │  │   os_info.py    │  │
-│  │  (Flask)    │──│ (CV-контр.) │──│  (мониторинг)   │  │
+│  │  (Flask)    │──│ (CV ctrl)   │──│  (monitoring)   │  │
 │  └──────┬──────┘  └──────┬──────┘  └─────────────────┘  │
 │         │                │                              │
 │         │       ┌────────┴────────┐                     │
-│         │       │  4 NPU-клиента  │                     │
-│         │       │  (UNIX-сокеты)  │                     │
+│         │       │  4 NPU clients  │                     │
+│         │       │  (UNIX sockets) │                     │
 │         │       └────────┬────────┘                     │
 │         │                │                              │
 │  ┌──────┴──────┐  ┌──────┴──────┐  ┌─────────────────┐  │
@@ -87,51 +88,51 @@
                  ┌─────────┴─────────┐
                  │      ESP32        │
                  │  (General Driver) │
-                 │  моторы/сервы/IMU │
+                 │ motors/servos/IMU │
                  └───────────────────┘
 ```
 
-**Ключевые решения:**
-- **4 NPU-сервера** через UNIX-сокеты (RAW BGR).
-- **ArUco** — через OpenCV (CPU), не NPU.
-- Видео через GStreamer `tee` — превью и запись одновременно.
-- CV-режимы переключаются JSON-командами (`{"T":10304}` = OBJECTS, `{"T":10309}` = MP POSE, `{"T":10310}` = DEPTH, `{"T":10311}` = SEG, `{"T":10312}` = ARUCO).
-## 📁 Структура проекта
+**Key decisions:**
+- **4 NPU servers** via UNIX sockets (RAW BGR).
+- **ArUco** — via OpenCV (CPU), not the NPU.
+- Video via GStreamer `tee` — preview and recording simultaneously.
+- CV modes are switched via JSON commands (`{"T":10304}` = OBJECTS, `{"T":10309}` = MP POSE, `{"T":10310}` = DEPTH, `{"T":10311}` = SEG, `{"T":10312}` = ARUCO).
+## 📁 Project structure
 
 ```
 ugv_rpi/
-├── app.py                 # точка входа (Flask + Socket.IO)
-├── config.yaml            # конфигурация
+├── app.py                 # entry point (Flask + Socket.IO)
+├── config.yaml            # configuration
 ├── requirements.txt
-├── core/                  # основные модули
-│   ├── cv_ctrl.py         # CV-контроллер
+├── core/                  # core modules
+│   ├── cv_ctrl.py         # CV controller
 │   ├── base_ctrl.py       # UART → ESP32
-│   ├── gst_stream.py      # GStreamer-пайплайн
-│   ├── os_info.py         # мониторинг
+│   ├── gst_stream.py      # GStreamer pipeline
+│   ├── os_info.py         # monitoring
 │   ├── audio_ctrl.py
 │   └── pt_stabilizer.py
-├── modules/               # NPU-клиенты (UNIX-сокеты)
-│   ├── npu_client.py      # детекция
+├── modules/               # NPU clients (UNIX sockets)
+│   ├── npu_client.py      # detection
 │   ├── npu_pose_client.py
 │   ├── npu_seg_client.py
 │   ├── npu_depth_client.py
 │   └── aruco_client.py
-├── scripts/               # shell-скрипты
-├── tools/                 # утилиты (калибровка, тесты)
-├── axcl_servers/          # C++ AXCL-серверы (AX-M1)
-├── templates/             # веб-интерфейс
-├── controllers/           # джойстик, RoArm
-├── models/                # модели (MediaPipe, калибровка)
-├── models_axcl/           # модели AX-M1 (.axmodel)
-├── yolo*/                 # NPU-серверы A733 + конвертация
-└── ugv-env/               # виртуальное окружение
+├── scripts/               # shell scripts
+├── tools/                 # utilities (calibration, tests)
+├── axcl_servers/          # C++ AXCL servers (AX-M1)
+├── templates/             # web interface
+├── controllers/           # joystick, RoArm
+├── models/                # models (MediaPipe, calibration)
+├── models_axcl/           # AX-M1 models (.axmodel)
+├── yolo*/                 # A733 NPU servers + conversion
+└── ugv-env/               # virtual environment
 ```
 
-## 🛠️ Сборка Armbian
+## 🛠️ Building Armbian
 
-**Репозиторий для сборки:** [armbian/build](https://github.com/armbian/build) — поддержка Orange Pi 4 Pro уже в основной ветке.
+**Build repository:** [armbian/build](https://github.com/armbian/build) — Orange Pi 4 Pro support is already in the main branch.
 
-**Команды сборки:**
+**Build commands:**
 
 ```bash
 git clone https://github.com/armbian/build.git
@@ -142,20 +143,20 @@ cd build
   KERNEL_CONFIGURE=no KERNEL_BTF=no KERNEL_GIT=shallow
 ```
 
-**Результат:** `Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_vendor_6.6.98_minimal.img`
+**Result:** `Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_vendor_6.6.98_minimal.img`
 
-**Что включено:**
-- Ядро 6.6.98-vendor-sun60iw2.
+**What's included:**
+- Kernel 6.6.98-vendor-sun60iw2.
 - DTB: sun60i-a733-orangepi-4-pro.dtb.
 - GPU PowerVR BXM-4-64 (EGL/GLES/GBM/Vulkan/OpenCL).
 - NPU VIPLite (`/dev/vipcore`, `libVIPhal.so`, `libNBGlinker.so`).
 - VPU CedarC (`/dev/cedar_dev`, `/dev/cedar_dev_ve2`).
-- ISP (libAWIspApi) — для CSI-камер.
+- ISP (libAWIspApi) — for CSI cameras.
 - GStreamer OMX (`gstreamer1.0-omx-allwinner`).
 
-## 💾 Установка ОС
+## 💾 Installing the OS
 
-**Запись на SD-карту:**
+**Writing to an SD card:**
 
 ```bash
 unxz Armbian-...-minimal.img.xz
@@ -163,79 +164,79 @@ sudo dd if=Armbian-unofficial_26.11.0-trunk_Orangepi4pro_trixie_vendor_6.6.98_mi
 sync
 ```
 
-**Первый запуск:**
-1. Вставить SD-карту в Orange Pi 4 Pro.
-2. Подключить Ethernet + HDMI.
-3. Загрузиться.
-4. Пройти `armbian-firstlogin` (через HDMI + клавиатуру).
-5. Сменить пароль root, создать пользователя.
-## 💾 Носители: eMMC и NVMe
+**First boot:**
+1. Insert the SD card into the Orange Pi 4 Pro.
+2. Connect Ethernet + HDMI.
+3. Boot.
+4. Complete `armbian-firstlogin` (via HDMI + keyboard).
+5. Change the root password, create a user.
+## 💾 Storage: eMMC and NVMe
 
-**Выбор носителя:**
-- **eMMC** — встроенный модуль (32 ГБ). Скорость ~205 МБ/с. Проще в установке.
-- **NVMe SSD** — M.2 M-Key (128 ГБ). Скорость ~570 МБ/с. Требует SPI Flash + патч U-Boot.
+**Choosing the storage:**
+- **eMMC** — built-in module (32 GB). Speed ~205 MB/s. Easier to install.
+- **NVMe SSD** — M.2 M-Key (128 GB). Speed ~570 MB/s. Requires SPI Flash + a U-Boot patch.
 
-**Общий порядок загрузки:**
+**General boot order:**
 ```
 BootROM: SD -> eMMC -> SPI -> USB
 U-Boot (boot_targets): SD -> eMMC -> NVMe -> USB
 ```
 
-### Вариант A: Установка на eMMC (ручное копирование)
+### Option A: Installing on eMMC (manual copy)
 
-**Важно:** `armbian-install` багованный на Orange Pi 4 Pro — неправильно копирует `boot_package`. Использовать **ручное** копирование.
+**Important:** `armbian-install` is buggy on the Orange Pi 4 Pro — it copies `boot_package` incorrectly. Use **manual** copying.
 
 ```bash
-# 1. Размонтировать eMMC
+# 1. Unmount eMMC
 sudo umount /mnt/emmc 2>/dev/null
 
-# 2. Разметить eMMC (таблица разделов как на SD)
+# 2. Partition eMMC (same partition table as on SD)
 sudo sfdisk -d /dev/mmcblk1 | sudo sfdisk /dev/mmcblk0
 
-# 3. Форматировать eMMC
+# 3. Format eMMC
 sudo mkfs.ext4 -F /dev/mmcblk0p1
 
-# 4. Смонтировать eMMC
+# 4. Mount eMMC
 sudo mkdir -p /mnt/emmc
 sudo mount /dev/mmcblk0p1 /mnt/emmc
 
-# 5. Скопировать систему с SD на eMMC (5-10 минут)
+# 5. Copy the system from SD to eMMC (5-10 minutes)
 sudo rsync -aAXHv --exclude={/dev/*,/proc/*,/sys/*,/tmp/*,/run/*,/mnt/*,/media/*,/lost+found,/var/log.hdd/*} / /mnt/emmc/
 
-# 6. Настроить armbianEnv.txt (новый UUID eMMC)
-sudo blkid /dev/mmcblk0p1  # запомнить UUID
-sudo sed -i 's/^rootdev=.*/rootdev=UUID=<НОВЫЙ_UUID>/' /mnt/emmc/boot/armbianEnv.txt
+# 6. Configure armbianEnv.txt (new eMMC UUID)
+sudo blkid /dev/mmcblk0p1  # note the UUID
+sudo sed -i 's/^rootdev=.*/rootdev=UUID=<NEW_UUID>/' /mnt/emmc/boot/armbianEnv.txt
 
-# 7. Настроить fstab (новый UUID eMMC)
-sudo sed -i 's/^UUID=.* \/ ext4/UUID=<НОВЫЙ_UUID> \/ ext4/' /mnt/emmc/etc/fstab
+# 7. Configure fstab (new eMMC UUID)
+sudo sed -i 's/^UUID=.* \/ ext4/UUID=<NEW_UUID> \/ ext4/' /mnt/emmc/etc/fstab
 
-# 8. Отключить авто-resize на eMMC
+# 8. Disable auto-resize on eMMC
 sudo mkdir -p /mnt/emmc/etc/systemd/system
 sudo ln -sf /dev/null /mnt/emmc/etc/systemd/system/armbian-resize-filesystem.service
 
-# 9. Скопировать загрузчик (U-Boot + boot_package) — 20 МБ
+# 9. Copy the bootloader (U-Boot + boot_package) — 20 MB
 sudo dd if=/dev/mmcblk1 of=/dev/mmcblk0 bs=1M count=20 conv=notrunc
 
-# 10. Синхронизировать и размонтировать
+# 10. Sync and unmount
 sudo sync
 sudo umount /mnt/emmc
 
-# 11. Выключить, вытащить SD, загрузиться с eMMC
+# 11. Power off, remove the SD card, boot from eMMC
 sudo shutdown -h now
 ```
 
-**После первой загрузки — расширить раздел до 29 ГБ:**
+**After the first boot — expand the partition to 29 GB:**
 
 ```bash
 sudo parted /dev/mmcblk0 resizepart 1 100%
 sudo resize2fs /dev/mmcblk0p1
 df -h /
 ```
-### Вариант B: Установка на NVMe (SPI + патч U-Boot)
+### Option B: Installing on NVMe (SPI + U-Boot patch)
 
-**Требуется:** SPI Flash + U-Boot с патчем `dc1sw1` (см. ниже).
+**Required:** SPI Flash + U-Boot with the `dc1sw1` patch (see below).
 
-**1. Сборка U-Boot с патчем (VirtualBox):**
+**1. Building U-Boot with the patch (VirtualBox):**
 
 ```bash
 cd ~/orangepi-build
@@ -245,14 +246,14 @@ cp /tmp/uboot-fix/patches/0001-orangepi4pro-pcie-3v3-dc1sw1.patch userpatches/u-
 sudo ./build.sh BOARD=orangepi4pro BRANCH=current RELEASE=jammy BUILD_OPT=u-boot KERNEL_CONFIGURE=no CLEAN_LEVEL=make
 ```
 
-**2. Установка на Orange Pi:**
+**2. Installing on the Orange Pi:**
 
 ```bash
 sudo dpkg -r linux-u-boot-orangepi4pro-vendor
 sudo dpkg -i linux-u-boot-current-orangepi4pro_1.1.0_arm64.deb
 ```
 
-**3. Прошивка SPI:**
+**3. Flashing SPI:**
 
 ```bash
 sudo dd if=/dev/mtd0 of=/root/spi_backup_$(date +%Y%m%d_%H%M%S).bin bs=1M count=16
@@ -262,7 +263,7 @@ sudo mtd_debug write /dev/mtd0 262144 $(stat --format="%s" /usr/lib/linux-u-boot
 sudo sync
 ```
 
-**4. Перенос системы на NVMe:**
+**4. Moving the system to NVMe:**
 
 ```bash
 sudo parted /dev/nvme0n1 mklabel gpt
@@ -275,9 +276,9 @@ sudo sed -i 's|<UUID_EMMC>|<UUID_NVME>|g' /mnt/nvme/etc/fstab
 sudo sync && sudo umount /mnt/nvme
 ```
 
-**5. Выключить, вынуть eMMC, включить.**
+**5. Power off, remove the eMMC, power on.**
 
-**Результат:**
+**Result:**
 
 ```
 $ findmnt -no SOURCE,UUID /
@@ -290,64 +291,64 @@ $ df -h /
 /dev/nvme0n1p1 117G 11G 101G 10% /
 ```
 
-**Скорость:** 570 МБ/с (NVMe Gen3 x1) vs 205 МБ/с (eMMC).
+**Speed:** 570 MB/s (NVMe Gen3 x1) vs 205 MB/s (eMMC).
 
-**Причина, почему U-Boot не видел NVMe:** U-Boot включал не тот ключ 3.3 В (`dc1sw2` вместо `dc1sw1`). Патч: `pcie3v3_supply = "dc1sw1"` в `board-uboot.dts`.
-## ⚠️ CQE-баг eMMC
+**Why U-Boot did not see the NVMe:** U-Boot switched on the wrong 3.3 V rail (`dc1sw2` instead of `dc1sw1`). Patch: `pcie3v3_supply = "dc1sw1"` in `board-uboot.dts`.
+## ⚠️ eMMC CQE bug
 
-**Проблема:** драйвер `sunxi-mmc` на A733 имеет баг с CQE (Command Queue Engine). При высокой частоте (200 МГц) CQE не может остановиться (`Failed to halt`), драйвер отключает CQE и сбрасывает частоту до 50 МГц.
+**Problem:** the `sunxi-mmc` driver on the A733 has a bug with CQE (Command Queue Engine). At high frequency (200 MHz) the CQE cannot halt (`Failed to halt`); the driver disables CQE and drops the frequency to 50 MHz.
 
-**Решение:** использовать **HS400 @ 150 МГц**.
+**Solution:** use **HS400 @ 150 MHz**.
 
 ```bash
 DTB=/boot/dtb/allwinner/sun60i-a733-orangepi-4-pro.dtb
 NODE=/soc@3000000/sdmmc@4022000
 
-# Проверить
+# Check
 sudo dtc -I dtb -O dts $DTB 2>/dev/null | grep -A 30 "mmc@4022000" | \
     grep -E "compatible|max-frequency|sunxi-dly"
 
-# Должно быть:
+# Should be:
 #   compatible = "allwinner,sunxi-mmc-v5p3x";
-#   max-frequency = <0x8f0d180>;   (150 МГц)
+#   max-frequency = <0x8f0d180>;   (150 MHz)
 #   sunxi-dly-208M = <0xff 0x01 0xff 0xff 0xff 0xff>;
 
-# Если 200 МГц — снизить до 150
+# If 200 MHz — lower it to 150
 sudo fdtput -t i $DTB $NODE max-frequency 150000000
 sudo reboot
 ```
 
-**Результат:** 150 МГц (HS400), скорость ~205 МБ/с, CQE-ошибок нет.
+**Result:** 150 MHz (HS400), speed ~205 MB/s, no CQE errors.
 
-## ⚙️ Настройка интерфейсов
+## ⚙️ Interface setup
 
-### UART7 (пины 8/10)
+### UART7 (pins 8/10)
 
 ```bash
 sudo armbian-config
 # System -> Kernel -> Manage device tree overlays
-# Включить: uart7
-# Сохранить, выйти, перезагрузиться
+# Enable: uart7
+# Save, exit, reboot
 
 ls -la /dev/ttyS7
 # crw-rw---- 1 root dialout 241, 7 ... /dev/ttyS7
 ```
 
-**Loopback-тест (замкнуть пины 8 и 10):**
+**Loopback test (short pins 8 and 10):**
 
 ```bash
 picocom -b 115200 /dev/ttyS7
-# Печатать символы -> должны эхо-возвращаться
-# Выход: Ctrl+A, Ctrl+Q
+# Type characters -> they should echo back
+# Exit: Ctrl+A, Ctrl+Q
 ```
 
-### I2C2 (пины 19/23)
+### I2C2 (pins 19/23)
 
 ```bash
 sudo armbian-config
 # System -> Kernel -> Manage device tree overlays
-# Включить: i2c2
-# Сохранить, выйти, перезагрузиться
+# Enable: i2c2
+# Save, exit, reboot
 
 ls -la /dev/i2c-2
 # crw------- 1 root root 89, 2 ... /dev/i2c-2
@@ -356,14 +357,14 @@ apt install -y i2c-tools
 i2cdetect -y 2
 ```
 
-**armbianEnv.txt (после активации):**
+**armbianEnv.txt (after activation):**
 
 ```
 overlays=i2c2 uart7
 ```
-## 📦 Зависимости
+## 📦 Dependencies
 
-### Системные пакеты
+### System packages
 
 ```bash
 sudo apt update
@@ -382,7 +383,7 @@ sudo apt install -y \
     i2c-tools picocom unzip espeak-ng libespeak1
 ```
 
-### Python-зависимости (venv)
+### Python dependencies (venv)
 
 ```bash
 cd ~/ugv_rpi
@@ -424,82 +425,82 @@ pip install -r requirements.txt
 pip install imageio pygame-ce pyttsx3 netifaces
 ```
 
-**Ключевые моменты:**
-- **Pillow 11.3.0** (не 10.3.0 — не работает с Python 3.13).
-- **pygame-ce** (не pygame — нет wheel для Python 3.13 + ARM64).
-- **av 17.1.0** (не 12.3.0).
-- **aiortc 1.15.0** (не 1.8.0).
+**Key points:**
+- **Pillow 11.3.0** (not 10.3.0 — it doesn't work with Python 3.13).
+- **pygame-ce** (not pygame — there is no wheel for Python 3.13 + ARM64).
+- **av 17.1.0** (not 12.3.0).
+- **aiortc 1.15.0** (not 1.8.0).
 
 ## 🖐️ MediaPipe (HAND GS)
 
-Wheel для Orange Pi 4 Pro (aarch64, Python 3.13):
+Wheel for Orange Pi 4 Pro (aarch64, Python 3.13):
 https://github.com/ZHNovell/ugv_rpi/releases/download/mediapipe-0.10.14-aarch64/mediapipe-0.10.14.dev0-cp313-cp313-linux_aarch64.whl
 
-Установка:
+Installation:
 ```
 pip3 install --break-system-packages --ignore-installed --force-reinstall https://github.com/ZHNovell/ugv_rpi/releases/download/mediapipe-0.10.14-aarch64/mediapipe-0.10.14.dev0-cp313-cp313-linux_aarch64.whl
 ```
 
-Проверка:
+Verification:
 ```
 python3 -c "import mediapipe as mp; print(mp.__version__)"
 ```
 
-Модель hand landmarker:
+Hand landmarker model:
 ```
 wget -O /tmp/hand_landmarker.task https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
 ```
-### 🎯 Motion (Object Detection через YOLO26s NPU)
+### 🎯 Motion (Object Detection via YOLO26s NPU)
 
-Режим **Motion** (Simple Detection Type) теперь использует **YOLO26s на NPU** (`/tmp/npu11.sock`), а не `absdiff` или `efficientdet`. Это даёт:
+The **Motion** mode (Simple Detection Type) now uses **YOLO26s on the NPU** (`/tmp/npu11.sock`), not `absdiff` or `efficientdet`. This provides:
 
-- **Точность:** находит **людей** (класс `person`), а не абстрактное движение.
-- **Скорость:** ~53 мс на кадр (NPU), боксы обновляются быстро.
-- **Устойчивость:** не «сходит с ума», когда камера двигается (в отличие от `absdiff`).
-- **Dead Zone:** если объект в центре (60 пикселей), серва не дёргается.
-- **Подсветка:** при обнаружении включает прожектор (IO5) в режиме AUTO.
+- **Accuracy:** finds **people** (class `person`), not abstract motion.
+- **Speed:** ~53 ms per frame (NPU), boxes update quickly.
+- **Stability:** it doesn't "go crazy" when the camera moves (unlike `absdiff`).
+- **Dead Zone:** if the object is in the center (60 pixels), the servo does not twitch.
+- **Lighting:** on detection it turns on the spotlight (IO5) in AUTO mode.
 
-**Код:** `cv_detect_movition` в `cv_ctrl.py` (вызов `self.npu_client.detect(img)`).
+**Code:** `cv_detect_movition` in `cv_ctrl.py` (calling `self.npu_client.detect(img)`).
 
 ### 📷 WebRTC Resolution Switcher
 
-Кнопка **WebRTC** заменена на выпадающий список **1080P / 720P**. Переключение — мгновенное (через `set_camera_mode()` и `GstStream.switch_mode()`).
+The **WebRTC** button has been replaced with a **1080P / 720P** dropdown list. Switching is instant (via `set_camera_mode()` and `GstStream.switch_mode()`).
 
-**Код:** `set_camera_mode()` в `cv_ctrl.py`, команды `cam_1080` (10108) и `cam_720` (10109) в `config.yaml`.
+**Code:** `set_camera_mode()` in `cv_ctrl.py`, commands `cam_1080` (10108) and `cam_720` (10109) in `config.yaml`.
 
-## 🧠 NPU-серверы
+## 🧠 NPU servers
 
-**Сравнение двух вариантов размещения моделей:**
+**Comparison of the two model placement options:**
 
-| Модель | Встроенный NPU (A733) | Radxa AICore AX-M1 |
+| Model | Built-in NPU (A733) | Radxa AICore AX-M1 |
 |---|---|---|
-| Детекция | YOLO26s — `/tmp/npu11.sock` | — |
-| Позы | YOLO11s-pose — `/tmp/npu_pose_raw.sock` | YOLO26m-pose — `/tmp/npu_pose_axcl.sock` |
-| Сегментация | YOLO11s-seg — `/tmp/npu_seg_raw.sock` | YOLO26m-seg — `/tmp/npu_seg_axcl.sock` |
-| Глубина | YOLO26n-depth — `/tmp/npu_depth_raw.sock` | YOLO26m-depth — `/tmp/npu_depth_axcl.sock` |
+| Detection | YOLO26s — `/tmp/npu11.sock` | — |
+| Pose | YOLO11s-pose — `/tmp/npu_pose_raw.sock` | YOLO26m-pose — `/tmp/npu_pose_axcl.sock` |
+| Segmentation | YOLO11s-seg — `/tmp/npu_seg_raw.sock` | YOLO26m-seg — `/tmp/npu_seg_axcl.sock` |
+| Depth | YOLO26n-depth — `/tmp/npu_depth_raw.sock` | YOLO26m-depth — `/tmp/npu_depth_axcl.sock` |
 
-**Протокол (RAW BGR)** — одинаков для обоих вариантов:
+**Protocol (RAW BGR)** — the same for both options:
 
 ```
-Клиент -> Сервер: [4 байта BE: width] [4 байта BE: height] [4 байта BE: channels] [raw BGR]
-Сервер -> Клиент: [4 байта BE: длина JSON] [JSON bytes]
+Client -> Server: [4 BE bytes: width] [4 BE bytes: height] [4 BE bytes: channels] [raw BGR]
+Server -> Client: [4 BE bytes: JSON length] [JSON bytes]
 ```
 
-### Вариант 1: встроенный NPU (A733)
+### Option 1: built-in NPU (A733)
 
-Все 4 модели работают на встроенном NPU A733. Python-клиенты — в `modules/`:
+All 4 models run on the built-in A733 NPU. The Python clients are in `modules/`:
 - `npu_client.py` — YOLO26s
 - `npu_pose_client.py` — YOLO11_pose
 - `npu_seg_client.py` — YOLO11_seg
 - `npu_depth_client.py` — YOLO26n_depth
 
-#### YOLO26s (детекция объектов)
+#### YOLO26s (object detection)
 
-**Пайплайн конвертации:**
+**Conversion pipeline:**
 
-1. Скачать `yolo26s.pt` (Ultralytics).
-2. Экспорт ONNX: `yolo export model=yolo26s.pt format=onnx simplify=True dynamic=False opset=16`.
-3. Вырезать 6 выходов через `onnx_extract.py`:
+1. Download `yolo26s.pt` (Ultralytics).
+2. ONNX export: `yolo export model=yolo26s.pt format=onnx simplify=True dynamic=False opset=16`.
+3. Cut out the 6 outputs via `onnx_extract.py`:
    - `/model.23/Reshape_output_0` (`[1, 4, 6400]`)
    - `/model.23/Reshape_1_output_0` (`[1, 4, 1600]`)
    - `/model.23/Reshape_2_output_0` (`[1, 4, 400]`)
@@ -510,103 +511,103 @@ wget -O /tmp/hand_landmarker.task https://storage.googleapis.com/mediapipe-model
    - `./pegasus_import.sh yolo26s_6`
    - `./pegasus_quantize.sh yolo26s_6 pcq 12`
    - `./pegasus_export_ovx_nbg.sh yolo26s_6 pcq a733`
-5. Результат: `yolo26s_6_pcq_a733.nb` (9 МБ).
+5. Result: `yolo26s_6_pcq_a733.nb` (9 MB).
 
-**Нативная сборка:**
+**Native build:**
 
 ```bash
 cd /root/ugv_rpi/yolo26_raw/
 ./build_native.sh
 ```
 
-**Ключевые фиксы `CMakeLists.txt.patched`:**
+**Key fixes in `CMakeLists.txt.patched`:**
 1. `SYS_ARCH=linux_aarch64`.
-2. OpenCV через `pkg-config` (не `find_package`).
-3. Убрать `_GLIBCXX_USE_CXX11_ABI=0`.
-4. `MODEL_ZOO_HOME_DIR` — абсолютный путь.
-5. Исключить лишние `.cpp` (main, yolo11_6_*).
-#### YOLO11_pose (позы)
+2. OpenCV via `pkg-config` (not `find_package`).
+3. Remove `_GLIBCXX_USE_CXX11_ABI=0`.
+4. `MODEL_ZOO_HOME_DIR` — an absolute path.
+5. Exclude the extra `.cpp` files (main, yolo11_6_*).
+#### YOLO11_pose (pose)
 
-**Пайплайн:**
+**Pipeline:**
 1. `yolo11s-pose.pt` -> ONNX (opset 15).
-2. `onnx_extract.py` — вырезать 9 выходов (cv2/cv3/cv4 × 3 уровня).
+2. `onnx_extract.py` — cut out the 9 outputs (cv2/cv3/cv4 × 3 levels).
 3. Docker ACUITY:
    - `./pegasus_import.sh yolo11s-pose_9`
    - `./pegasus_quantize.sh yolo11s-pose_9 uint8 12`
    - `./pegasus_export_ovx_nbg.sh yolo11s-pose_9 uint8 a733`
-4. Результат: `yolo11s-pose_9_uint8_a733.nb` (7 МБ).
+4. Result: `yolo11s-pose_9_uint8_a733.nb` (7 MB).
 
-**Модель:**
-- 9 выходов: bbox (cv2) + class (cv3) + keypoints (cv4) × 3 уровня.
-- 1 класс — person.
-- 17 keypoints (COCO): нос, глаза, уши, плечи, локти, запястья, бёдра, колени, лодыжки.
+**Model:**
+- 9 outputs: bbox (cv2) + class (cv3) + keypoints (cv4) × 3 levels.
+- 1 class — person.
+- 17 keypoints (COCO): nose, eyes, ears, shoulders, elbows, wrists, hips, knees, ankles.
 
-**Нативная сборка:**
+**Native build:**
 
 ```bash
 cd /root/ugv_rpi/yolo11_pose_raw/
 ./build_native.sh
 ```
 
-#### YOLO11_seg (сегментация)
+#### YOLO11_seg (segmentation)
 
-**Пайплайн:**
-1. Скачать `yolo11s-seg_10.onnx` (Allwinner, 40 МБ) — уже обрезан.
+**Pipeline:**
+1. Download `yolo11s-seg_10.onnx` (Allwinner, 40 MB) — already trimmed.
 2. Docker ACUITY:
    - `./pegasus_import.sh yolo11s-seg_10`
    - `./pegasus_quantize.sh yolo11s-seg_10 uint8 12`
    - `./pegasus_export_ovx_nbg.sh yolo11s-seg_10 uint8 a733`
-3. Результат: `yolo11s-seg_10_uint8_a733.nb` (7.3 МБ).
+3. Result: `yolo11s-seg_10_uint8_a733.nb` (7.3 MB).
 
-**Модель:**
-- 10 выходов: bbox + class + mask coeffs + protos × 3 уровня.
-- 80 классов (COCO).
-- Instance segmentation (пиксельные маски).
+**Model:**
+- 10 outputs: bbox + class + mask coeffs + protos × 3 levels.
+- 80 classes (COCO).
+- Instance segmentation (pixel masks).
 
-**Нативная сборка:**
+**Native build:**
 
 ```bash
 cd /root/ugv_rpi/yolo11_seg_raw/
 ./build_native.sh
 ```
 
-#### YOLO26n_depth (карта глубины)
+#### YOLO26n_depth (depth map)
 
-**Пайплайн:**
-1. Скачать `yolo26n-depth.pt` (Ultralytics, 12.4 МБ).
-2. Экспорт ONNX: `imgsz=768, opset=14, simplify=True`.
+**Pipeline:**
+1. Download `yolo26n-depth.pt` (Ultralytics, 12.4 MB).
+2. ONNX export: `imgsz=768, opset=14, simplify=True`.
 3. Docker ACUITY:
    - `./pegasus_import.sh yolo26n-depth`
    - `./pegasus_quantize.sh yolo26n-depth pcq 10`
    - `./pegasus_export_ovx_nbg.sh yolo26n-depth pcq a733`
-4. Результат: `yolo26n-depth_pcq_a733.nb` (10.4 МБ).
+4. Result: `yolo26n-depth_pcq_a733.nb` (10.4 MB).
 
-**Модель:**
-- Вход: 768×768 RGB (mean=0, scale=1/255).
-- Выход: 768×768 float32 (метры).
+**Model:**
+- Input: 768×768 RGB (mean=0, scale=1/255).
+- Output: 768×768 float32 (meters).
 
-**Важно:** nano + PCQ — лучший баланс (65 мс, ~11 FPS). s + PCQ шумит из-за `Exp()` на выходе.
+**Important:** nano + PCQ is the best balance (65 ms, ~11 FPS). s + PCQ is noisy due to `Exp()` at the output.
 
-**Нативная сборка:**
+**Native build:**
 
 ```bash
 cd /root/ugv_rpi/yolo26_depth_raw/
 ./build_native.sh
 ```
-#### Процесс перевода сервера на RAW BGR
+#### Process of migrating the server to RAW BGR
 
-Для каждого из 4 серверов:
+For each of the 4 servers:
 
-**1. Копируем папку сервера в `_raw`:**
+**1. Copy the server folder to `_raw`:**
 
 ```bash
 cp -r yolo26 yolo26_raw
 cd yolo26_raw
 ```
 
-**2. Правим `npu_server.cpp` — меняем приём JPEG на raw BGR.**
+**2. Edit `npu_server.cpp` — change JPEG input to raw BGR.**
 
-Было (JPEG):
+Before (JPEG):
 ```cpp
 uint32_t jpeg_len_be;
 if (!read_n(cli, &jpeg_len_be, 4)) break;
@@ -616,7 +617,7 @@ if (!read_n(cli, jpeg_buf.data(), jpeg_len)) break;
 cv::Mat frame = cv::imdecode(jpeg_buf, cv::IMREAD_COLOR);
 ```
 
-Стало (RAW):
+After (RAW):
 ```cpp
 uint32_t width_be, height_be, channels_be;
 if (!read_n(cli, &width_be, 4)) break;
@@ -639,15 +640,15 @@ if (!read_n(cli, raw_buf.data(), raw_size)) break;
 cv::Mat frame = cv::Mat(height, width, CV_8UC3, raw_buf.data()).clone();
 ```
 
-**Важно:** `.clone()` — обязательно, иначе данные `raw_buf` уничтожаются после выхода из блока.
+**Important:** `.clone()` is mandatory, otherwise the `raw_buf` data is destroyed after leaving the block.
 
-**3. Меняем SOCKET_PATH на `_raw`:**
+**3. Change SOCKET_PATH to `_raw`:**
 
 ```cpp
 #define SOCKET_PATH "/tmp/npu11_raw.sock"
 ```
 
-**4. Правим `build_native.sh`:**
+**4. Edit `build_native.sh`:**
 
 ```bash
 SRC_DIR=${REPO_DIR}
@@ -655,16 +656,16 @@ mkdir -p "${SRC_DIR}"
 rm -f "${SRC_DIR}/yolov26_6_post.cpp" "${SRC_DIR}/yolov26_6_pre.cpp"
 ```
 
-**5. Собираем:**
+**5. Build:**
 
 ```bash
 ./build_native.sh
 cp -f build/npu_server ./npu_server
 ```
 
-**6. Правим `npu_client.py` — отправка raw BGR.**
+**6. Edit `npu_client.py` — send raw BGR.**
 
-Было (JPEG):
+Before (JPEG):
 ```python
 ok, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
 jpeg_bytes = jpeg.tobytes()
@@ -672,7 +673,7 @@ self.sock.sendall(struct.pack('>I', len(jpeg_bytes)))
 self.sock.sendall(jpeg_bytes)
 ```
 
-Стало (RAW):
+After (RAW):
 ```python
 h, w = frame.shape[:2]
 self.sock.sendall(struct.pack('>I', w))
@@ -681,13 +682,13 @@ self.sock.sendall(struct.pack('>I', 3))
 self.sock.sendall(frame.tobytes())
 ```
 
-**7. Меняем SOCKET_PATH в клиенте:**
+**7. Change SOCKET_PATH in the client:**
 
 ```python
 SOCKET_PATH = "/tmp/npu11_raw.sock"
 ```
 
-**8. Добавляем таймаут в `_connect` (10 сек):**
+**8. Add a timeout to `_connect` (10 s):**
 
 ```python
 attempts = 0
@@ -701,7 +702,7 @@ while attempts < 20:
 raise ConnectionError(f"[NPUClient] Server {self.socket_path} not available after 10s")
 ```
 
-**9. Обновляем systemd-сервис:**
+**9. Update the systemd service:**
 
 ```bash
 sudo sed -i 's|/root/ugv_rpi/yolo26/|/root/ugv_rpi/yolo26_raw/|g' /etc/systemd/system/npu-server.service
@@ -709,44 +710,44 @@ sudo systemctl daemon-reload
 sudo systemctl restart npu-server.service
 ```
 
-**10. Проверяем:**
+**10. Verify:**
 
 ```bash
 ls -la /tmp/npu11_raw.sock
 ps aux | grep npu_server | grep -v grep
 ```
-### Вариант 2: Radxa AICore AX-M1
+### Option 2: Radxa AICore AX-M1
 
-Детекция остаётся на A733, а pose/seg/depth работают на **AX-M1 (AX650N)** через C++ AXCL-серверы в `axcl_servers/`.
+Detection stays on the A733, while pose/seg/depth run on the **AX-M1 (AX650N)** via C++ AXCL servers in `axcl_servers/`.
 
-| Сервис | Модель (`models_axcl/`) | Сокет |
+| Service | Model (`models_axcl/`) | Socket |
 |---|---|---|
 | `npu-pose-axcl-server.service` | `yolo26m-pose_npu3.axmodel` | `/tmp/npu_pose_axcl.sock` |
 | `npu-seg-axcl-server.service` | `yolo26m-seg.axmodel` | `/tmp/npu_seg_axcl.sock` |
 | `npu-depth-axcl-server.service` | `yolo26m-depth.axmodel` | `/tmp/npu_depth_axcl.sock` |
 
-**Сборка:**
+**Build:**
 
 ```bash
 cd /root/ugv_rpi/axcl_servers
 ./build.sh
 ```
 
-Модели (`.axmodel`, в `models_axcl/`) скачиваются с Hugging Face (организация AXERA-TECH). Подробнее — в `axcl_servers/README.md`.
+The models (`.axmodel`, in `models_axcl/`) are downloaded from Hugging Face (the AXERA-TECH organization). More details — in `axcl_servers/README.md`.
 
-AX-M1 подключается по PCIe; модули ядра AXCL (`ax_pcie_host_dev`, `axcl_host` и др.) подгружаются через `ExecStartPre` в сервисах.
+The AX-M1 connects via PCIe; the AXCL kernel modules (`ax_pcie_host_dev`, `axcl_host`, etc.) are loaded via `ExecStartPre` in the services.
 
-## 🔧 Адаптация кода
+## 🔧 Code adaptation
 
 ### `base_ctrl.py`
 
-**Изменение:** UART-порт.
+**Change:** UART port.
 
 ```python
-# Было (Raspberry Pi):
+# Before (Raspberry Pi):
 base = BaseController('/dev/ttyAMA0', 115200)
 
-# Стало (Orange Pi 4 Pro):
+# After (Orange Pi 4 Pro):
 base = BaseController('/dev/ttyS7', 115200)
 ```
 
@@ -756,10 +757,10 @@ sed -i "s|/dev/ttyAMA0|/dev/ttyS7|g" base_ctrl.py
 
 ### `app.py`
 
-**Изменение 1:** UART-порт + удаление блока проверки Raspberry Pi.
+**Change 1:** UART port + removal of the Raspberry Pi check block.
 
 ```python
-# Было:
+# Before:
 def is_raspberry_pi5():
     ...
 
@@ -768,17 +769,17 @@ if is_raspberry_pi5():
 else:
     base = BaseController('/dev/serial0', 115200)
 
-# Стало:
+# After:
 base = BaseController('/dev/ttyS7', 115200)
 ```
 
-**Изменение 2:** `eth0_ip` -> `end0_ip`.
+**Change 2:** `eth0_ip` -> `end0_ip`.
 
 ```bash
 sed -i 's/si\.eth0_ip/si.end0_ip/g' app.py
 ```
 
-**Изменение 3:** Добавлен обработчик `SIGTERM`.
+**Change 3:** Added a `SIGTERM` handler.
 
 ```python
 import signal
@@ -808,7 +809,7 @@ signal.signal(signal.SIGINT, cleanup_handler)
 ```
 ### `cv_ctrl.py`
 
-**Изменение 1:** Оборачиваем импорты в `try/except`.
+**Change 1:** Wrap the imports in `try/except`.
 
 ```python
 try:
@@ -834,11 +835,11 @@ except ImportError:
     print("depthai not available — OAK camera disabled")
 ```
 
-**Изменение 2:** Блоки `mediapipe` обёрнуты в `if MEDIAPIPE_AVAILABLE:`.
+**Change 2:** The `mediapipe` blocks are wrapped in `if MEDIAPIPE_AVAILABLE:`.
 
-**Изменение 3:** Блоки CSI/OAK — проверки `CSI_CAMERA_AVAILABLE`, `OAK_CAMERA_AVAILABLE`.
+**Change 3:** The CSI/OAK blocks — checks for `CSI_CAMERA_AVAILABLE`, `OAK_CAMERA_AVAILABLE`.
 
-**Изменение 4:** Инициализация NPU (вместо `cv2.dnn`).
+**Change 4:** NPU initialization (instead of `cv2.dnn`).
 
 ```python
 from npu_client import NPUClient
@@ -863,7 +864,7 @@ self.npu_depth_client = _try_client(NPUDepthClient, 'NPUDepthClient')
 
 ### `os_info.py`
 
-**Изменение 1:** `vcgencmd` -> `sysfs`.
+**Change 1:** `vcgencmd` -> `sysfs`.
 
 ```python
 with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
@@ -872,7 +873,7 @@ temperature = float(temperature_str) / 1000.0
 return round(temperature, 1)
 ```
 
-**Изменение 2:** `iwconfig` -> `iw`.
+**Change 2:** `iwconfig` -> `iw`.
 
 ```python
 result = subprocess.check_output(['/usr/sbin/iw', 'dev', 'wlan0', 'info'],
@@ -887,17 +888,17 @@ if signal_strength:
 return 0
 ```
 
-**Изменение 3:** `eth0` -> `end0`.
+**Change 3:** `eth0` -> `end0`.
 
 ```bash
 sed -i 's/'"'"'eth0'"'"'/'"'"'end0'"'"'/g' os_info.py
 sed -i 's/self\.eth0_ip/self.end0_ip/g' os_info.py
 ```
-## 🌐 Веб-интерфейс
+## 🌐 Web interface
 
 ### `templates/index.html`
 
-**Кнопки `OBJECTS`, `COLOR`, `HAND GS`:**
+**Buttons `OBJECTS`, `COLOR`, `HAND GS`:**
 
 ```html
 <div><button onclick="sendCmdObjs();" class="ctl_btn">OBJECTS</button></div>
@@ -905,7 +906,7 @@ sed -i 's/self\.eth0_ip/self.end0_ip/g' os_info.py
 <div><button onclick="sendCmdHand();" class="ctl_btn">HAND GS</button></div>
 ```
 
-**Блок NPU Depth/Seg:**
+**NPU Depth/Seg block:**
 
 ```html
 <div>
@@ -918,7 +919,7 @@ sed -i 's/self\.eth0_ip/self.end0_ip/g' os_info.py
 </div>
 ```
 
-**Версионирование `control.js`:**
+**`control.js` versioning:**
 
 ```html
 <script src="./control.js?v=8"></script>
@@ -926,7 +927,7 @@ sed -i 's/self\.eth0_ip/self.end0_ip/g' os_info.py
 
 ### `templates/control.js`
 
-**Функции:**
+**Functions:**
 
 ```javascript
 function sendCmdObjs() {
@@ -960,7 +961,7 @@ function sendCommand(command) {
 }
 ```
 
-**Обработчики кнопок (в `socket.on('update')`):**
+**Button handlers (in `socket.on('update')`):**
 
 ```javascript
 FButtons[0].onclick = function() { sendCommand('base -c {"T":' + cv_objs + '}'); };
@@ -994,43 +995,43 @@ if (npuDSBtn) {
 main { width: 1600px; margin: auto; }
 .box1 .section_video { width: 1000px; margin-right: 10px; }
 ```
-## 🛑 Emergency Stop (Аварийная остановка)
+## 🛑 Emergency Stop (Emergency stop)
 
-В веб-интерфейсе добавлена красная кнопка **STOP**.
-Она отправляет команду `{"T":0}` напрямую на ESP32 (через `/api/stop`), минуя джойстик и heartbeat.
+A red **STOP** button has been added to the web interface.
+It sends the command `{"T":0}` directly to the ESP32 (via `/api/stop`), bypassing the joystick and heartbeat.
 
-**Использование:**
-1. Нажмите **STOP** в веб-интерфейсе.
-2. Робот мгновенно остановится (даже если вы продолжаете удерживать клавишу движения).
+**Usage:**
+1. Press **STOP** in the web interface.
+2. The robot will stop instantly (even if you keep holding a movement key).
 
-**Примечание:** Для работы кнопки ESP32 должен быть прошит с поддержкой команды `{"T":0}` (см. репозиторий `ugv_base_general`).
+**Note:** For the button to work, the ESP32 must be flashed with support for the `{"T":0}` command (see the `ugv_base_general` repository).
 
-## 🎭 MP FACE (Кивок / Поворот)
+## 🎭 MP FACE (Nod / Turn)
 
-Новый режим **MP FACE** (MediaPipe Face Landmarker):
-*   **Кивок (Yaw):** Робот моргает IO5 дважды (0.3с/0.3с/0.3с) и **кивает в ответ** (PT вниз-вверх).
-*   **Поворот (Pitch):** Робот моргает IO5 дважды и **зеркально поворачивается** (PT).
+New **MP FACE** mode (MediaPipe Face Landmarker):
+*   **Nod (Yaw):** The robot blinks IO5 twice (0.3s/0.3s/0.3s) and **nods back** (PT down-up).
+*   **Turn (Pitch):** The robot blinks IO5 twice and **mirrors the turn** (PT).
 
-**Защита от дребезга:**
-*   Кивок срабатывает только при `dyaw > 3°` и `dpitch > 2°` (чтобы не путать с поворотом).
-*   После жеста ставится пауза **3 секунды**, чтобы камера «успокоилась».
+**Debounce protection:**
+*   The nod triggers only when `dyaw > 3°` and `dpitch > 2°` (so as not to confuse it with a turn).
+*   After a gesture, a **3-second** pause is set so the camera can "settle".
 
-**Реализация:** `mp_detect_face` в `cv_ctrl.py`, модель `face_landmarker.task`.
+**Implementation:** `mp_detect_face` in `cv_ctrl.py`, model `face_landmarker.task`.
 
-## 🎯 MP POSE (Угол локтя + Адаптивный PT)
+## 🎯 MP POSE (Elbow angle + Adaptive PT)
 
-Режим **MP POSE** (YOLO11_pose на NPU) теперь использует **угол локтя** для управления шасси:
-*   **FOLLOW (иди сюда):** Рука **прямая** (угол < 30°). Робот едет вперёд, подруливая за человеком.
-*   **HOLD (стой):** Рука **согнута** (угол > 60°). Робот останавливается.
+The **MP POSE** mode (YOLO11_pose on the NPU) now uses the **elbow angle** to control the chassis:
+*   **FOLLOW (come here):** The arm is **straight** (angle < 30°). The robot drives forward, steering to follow the person.
+*   **HOLD (stop):** The arm is **bent** (angle > 60°). The robot stops.
 
-**Адаптивный подъём PT:**
-*   При приближении (bbox > 60% кадра) PT поднимается ступенчато (15° → 17.5° → 20° → 22.5° → 25°).
-*   При удалении (bbox < 20%) PT опускается до 15°.
-*   Защита от дребезга: пауза 2 сек после каждого движения PT.
+**Adaptive PT lift:**
+*   On approach (bbox > 60% of the frame) the PT lifts in steps (15° → 17.5° → 20° → 22.5° → 25°).
+*   On moving away (bbox < 20%) the PT lowers to 15°.
+*   Debounce protection: a 2-second pause after each PT movement.
 
-**Реализация:** `_npu_pose_worker` в `cv_ctrl.py`.
+**Implementation:** `_npu_pose_worker` in `cv_ctrl.py`.
 
-## 🚀 Автозапуск
+## 🚀 Autostart
 
 ### `npu-server.service`
 
@@ -1169,7 +1170,7 @@ SendSIGKILL=yes
 WantedBy=multi-user.target
 ```
 
-**Активация:**
+**Activation:**
 
 ```bash
 sudo systemctl daemon-reload
@@ -1177,52 +1178,52 @@ sudo systemctl enable npu-server.service npu-pose-axcl-server.service npu-seg-ax
 sudo systemctl start npu-server.service npu-pose-axcl-server.service npu-seg-axcl-server.service npu-depth-axcl-server.service ugv.service
 ```
 
-**Логи:**
+**Logs:**
 
 ```bash
 journalctl -u ugv.service -f
 ```
-## 📡 JSON-команды (ESP32)
+## 📡 JSON commands (ESP32)
 
-### Команды управления (через UART7)
+### Control commands (via UART7)
 
-| Команда | JSON | Описание |
+| Command | JSON | Description |
 |---|---|---|
-| Движение | `{"T":1,"L":0.5,"R":0.5}` | L/R: -1.0 до 1.0 |
-| PWM напрямую | `{"T":11,"L":164,"R":164}` | L/R: -255 до 255 |
-| Скорость (rate) | `{"T":138,"L":0.3,"R":0.3}` | Масштаб скорости |
-| OLED | `{"T":3,"lineNum":0,"Text":"..."}` | Вывод текста |
-| Модуль | `{"T":4,"cmd":0}` | 0=Null, 1=RoArm, 2=PT |
-| PT сервы | `{"T":133,"X":0,"Y":0,"SPD":0,"ACC":0}` | Пан-тилт |
-| Свет | `{"T":132,"IO4":255,"IO5":255}` | IO4/IO5: 0-255 |
-| Телеметрия | `{"T":130}` | Запрос данных |
-| Поток телеметрии | `{"T":131,"cmd":1}` | Вкл/выкл |
-| Интервал телеметрии | `{"T":142,"cmd":0}` | мс |
+| Motion | `{"T":1,"L":0.5,"R":0.5}` | L/R: -1.0 to 1.0 |
+| PWM direct | `{"T":11,"L":164,"R":164}` | L/R: -255 to 255 |
+| Speed (rate) | `{"T":138,"L":0.3,"R":0.3}` | Speed scaling |
+| OLED | `{"T":3,"lineNum":0,"Text":"..."}` | Text output |
+| Module | `{"T":4,"cmd":0}` | 0=Null, 1=RoArm, 2=PT |
+| PT servos | `{"T":133,"X":0,"Y":0,"SPD":0,"ACC":0}` | Pan-tilt |
+| Light | `{"T":132,"IO4":255,"IO5":255}` | IO4/IO5: 0-255 |
+| Telemetry | `{"T":130}` | Data request |
+| Telemetry stream | `{"T":131,"cmd":1}` | On/off |
+| Telemetry interval | `{"T":142,"cmd":0}` | ms |
 
-### CV-команды
+### CV commands
 
-| Команда | T | Описание |
+| Command | T | Description |
 |---|---|---|
-| None | 10301 | Отключить детекцию |
-| Motion | 10302 | Детекция движения |
-| Faces | 10303 | Детекция лиц |
+| None | 10301 | Disable detection |
+| Motion | 10302 | Motion detection |
+| Faces | 10303 | Face detection |
 | Objects | 10304 | NPU YOLO26s |
-| Color | 10305 | Детекция цвета |
-| Hand GS | 10306 | Жесты рук |
-| Auto | 10307 | Авто-режим |
-| MP Face | 10308 | MediaPipe Face Landmarker (кивок/поворот) |
+| Color | 10305 | Color detection |
+| Hand GS | 10306 | Hand gestures |
+| Auto | 10307 | Auto mode |
+| MP Face | 10308 | MediaPipe Face Landmarker (nod/turn) |
 | MP Pose | 10309 | NPU YOLO11_pose |
 | Depth | 10310 | NPU YOLO26n_depth |
 | Seg | 10311 | NPU YOLO11_seg |
-| ArUco | 10312 | ArUco-маркеры |
-## 📷 USB-камера (UVC)
+| ArUco | 10312 | ArUco markers |
+## 📷 USB camera (UVC)
 
-**Подключение:**
-- Камера подключается в USB-порт Orange Pi 4 Pro.
-- Определяется как `/dev/video0` и `/dev/video1`.
-- Модуль `uvcvideo` загружается автоматически.
+**Connection:**
+- The camera plugs into a USB port on the Orange Pi 4 Pro.
+- It is detected as `/dev/video0` and `/dev/video1`.
+- The `uvcvideo` module loads automatically.
 
-**Проверка:**
+**Verification:**
 
 ```bash
 v4l2-ctl --list-devices
@@ -1230,7 +1231,7 @@ v4l2-ctl -d /dev/video0 --list-formats-ext
 fswebcam -d /dev/video0 --no-banner -r 1920x1080 -S 5 ./test.jpg
 ```
 
-**Универсальная детекция:**
+**Universal detection:**
 
 ```python
 def usb_camera_detection(self):
@@ -1254,87 +1255,87 @@ def usb_camera_detection(self):
     return False
 ```
 
-### Универсальный auto-detect FPS
+### Universal auto-detect FPS
 
-**Проблема:** разные камеры поддерживают разные FPS для разных разрешений.
+**Problem:** different cameras support different FPS for different resolutions.
 
-**Решение:** при переключении режима камера сама определяет максимальный FPS для выбранного разрешения через `v4l2-ctl --list-formats-ext`.
+**Solution:** when switching modes, the camera itself determines the maximum FPS for the selected resolution via `v4l2-ctl --list-formats-ext`.
 
 **`GstStream.detect_max_fps(width, height, device)`:**
-- Парсит вывод `v4l2-ctl --list-formats-ext`.
-- Находит секцию MJPG.
-- Ищет нужное разрешение.
-- Возвращает максимальный FPS.
-- **Ограничение:** 1080p — зависит от камеры (до 60 fps).
+- Parses the output of `v4l2-ctl --list-formats-ext`.
+- Finds the MJPG section.
+- Looks for the required resolution.
+- Returns the maximum FPS.
+- **Limitation:** 1080p — depends on the camera (up to 60 fps).
 
 **`GstStream.switch_mode(width, height, fps=None)`:**
-- Если `fps` не задан — вызывает `detect_max_fps`.
-- Пересоздаёт пайплайн с найденным FPS.
+- If `fps` is not specified — calls `detect_max_fps`.
+- Recreates the pipeline with the found FPS.
 
 **`cv_ctrl.toggle_camera_mode()`:**
-- Определяет целевое разрешение.
-- Вызывает `switch_mode(new_w, new_h)` без fps.
-- Формирует `self.camera_mode` динамически: `f"{height}p{real_fps}"`.
-## 🎥 Запись видео
+- Determines the target resolution.
+- Calls `switch_mode(new_w, new_h)` without fps.
+- Builds `self.camera_mode` dynamically: `f"{height}p{real_fps}"`.
+## 🎥 Video recording
 
-**Требование:** во время записи живой поток не должен прерываться.
+**Requirement:** the live stream must not be interrupted during recording.
 
-**Архитектура (GStreamer `tee`):**
+**Architecture (GStreamer `tee`):**
 
 ```
 v4l2src -> image/jpeg (MJPG, 1920x1080@30) -> jpegdec -> tee
-├─ queue (leaky) -> videoconvert -> BGR -> appsink (живой поток)
+├─ queue (leaky) -> videoconvert -> BGR -> appsink (live stream)
 └─ queue -> videoconvert -> videoscale -> 1280x720 I420
-   -> avenc_mjpeg -> matroskamux -> filesink (запись)
+   -> avenc_mjpeg -> matroskamux -> filesink (recording)
 ```
 
-**Ключевые решения:**
+**Key decisions:**
 
-1. **`tee` после `jpegdec`** — камера читается один раз. Живой поток не прерывается.
-2. **Контейнер `.mkv` (matroskamux), не `.avi`** — камера даёт VFR (в темноте FPS падает). AVI не хранит VFR корректно. Matroska сохраняет реальные PTS.
-3. **Энкодер `avenc_mjpeg`** (libav), не `jpegenc`.
-4. **Правильный teardown ветки записи:**
-   - Отлинковать `rec_tee_pad` от `rec_queue`.
-   - Отправить EOS через sink pad `rec_queue`.
+1. **`tee` after `jpegdec`** — the camera is read once. The live stream is not interrupted.
+2. **`.mkv` container (matroskamux), not `.avi`** — the camera produces VFR (FPS drops in the dark). AVI does not store VFR correctly. Matroska preserves the real PTS.
+3. **Encoder `avenc_mjpeg`** (libav), not `jpegenc`.
+4. **Proper teardown of the recording branch:**
+   - Unlink `rec_tee_pad` from `rec_queue`.
+   - Send EOS through the sink pad `rec_queue`.
    - `set_state(NULL)` -> `pipeline.remove()`.
-5. **`v4l2src do-timestamp=true`** — PTS из системных часов.
+5. **`v4l2src do-timestamp=true`** — PTS from the system clock.
 
-**Параметры:**
-- Разрешение записи: **1280x720**.
-- Битрейт MJPEG: **8 Мбит/с**, `qmin=3`, `qmax=10`.
-- Размер файла: ~10 МБ на 10 секунд.
+**Parameters:**
+- Recording resolution: **1280x720**.
+- MJPEG bitrate: **8 Mbit/s**, `qmin=3`, `qmax=10`.
+- File size: ~10 MB per 10 seconds.
 
-**Ограничение:** `.mkv` не проигрывается в браузере. Для просмотра — VLC / MPC-HC / ffmpeg.
-## 🎯 ArUco-маркеры
+**Limitation:** `.mkv` does not play in the browser. To view it — VLC / MPC-HC / ffmpeg.
+## 🎯 ArUco markers
 
-**Итог:** детекция ArUco через OpenCV (CPU). Точность — **±1 см на 1.35 м** (~0.7%). Кнопка **ARUCO** в веб-интерфейсе.
+**Result:** ArUco detection via OpenCV (CPU). Accuracy — **±1 cm at 1.35 m** (~0.7%). The **ARUCO** button is in the web interface.
 
-**Параметры:**
+**Parameters:**
 
-| Параметр | Значение |
+| Parameter | Value |
 |---|---|
-| Словарь | `DICT_4X4_50` |
-| Размер маркера | 14.6 см (чёрный квадрат) |
-| Разрешённые ID | 0, 1, 2, 3 |
-| Разрешение | 1280×720 |
-| Калибровка | `camera_calib.npz` (RMS=0.3475) |
-| Точность | ±1 см на 1.35 м (~0.7%) |
+| Dictionary | `DICT_4X4_50` |
+| Marker size | 14.6 cm (black square) |
+| Allowed IDs | 0, 1, 2, 3 |
+| Resolution | 1280×720 |
+| Calibration | `camera_calib.npz` (RMS=0.3475) |
+| Accuracy | ±1 cm at 1.35 m (~0.7%) |
 
-**Файлы:**
-- `aruco_client.py` — клиент (детекция + поза + отрисовка).
-- `aruco_detect.py` — демо-скрипт.
-- `camera_calibrate_v2.py` — калибровка без GUI.
-- `camera_calib.npz` — сохранённая калибровка.
+**Files:**
+- `aruco_client.py` — client (detection + pose + drawing).
+- `aruco_detect.py` — demo script.
+- `camera_calibrate_v2.py` — calibration without a GUI.
+- `camera_calib.npz` — saved calibration.
 
-**Калибровка камеры:**
+**Camera calibration:**
 
 ```bash
 python3 camera_calibrate_v2.py
 ```
 
-Собрать 25 кадров с шахматной доской (5×8 внутренних углов, 30 мм). Результат: `camera_calib.npz` (RMS=0.3475).
+Capture 25 frames with a chessboard (5×8 internal corners, 30 mm). Result: `camera_calib.npz` (RMS=0.3475).
 
-**Автомасштабирование под разрешение:**
+**Auto-scaling to resolution:**
 
 ```python
 if (self.calib_w != frame_w) or (self.calib_h != frame_h):
@@ -1345,143 +1346,142 @@ if (self.calib_w != frame_w) or (self.calib_h != frame_h):
     self.camera_matrix[0, 2] *= scale_x  # cx
     self.camera_matrix[1, 2] *= scale_y  # cy
 ```
-## 📊 Стресс-тесты
+## 📊 Stress tests
 
-**Условия:** 4 NPU-модели, реальный видеопоток 720p60, 70 сек на модель + 70 сек параллельно. Мониторинг CPU/RAM/TEMP каждые 2 сек.
+**Conditions:** 4 NPU models, a real 720p60 video stream, 70 s per model + 70 s in parallel. CPU/RAM/TEMP monitoring every 2 s.
 
-### RAW BGR (актуальные)
+### RAW BGR (current)
 
-**По очереди (70 сек на модель):**
+**One at a time (70 s per model):**
 
-| Модель | avg | FPS | Кадров |
+| Model | avg | FPS | Frames |
 |---|---|---|---|
-| YOLO26s | 67.3 мс | **14.9** | 703 |
-| YOLO11_pose | 53.3 мс | **18.8** | 720 |
-| YOLO11_seg | 90.0 мс | **11.1** | 632 |
-| YOLO26n_depth | 94.4 мс | **10.6** | 580 |
+| YOLO26s | 67.3 ms | **14.9** | 703 |
+| YOLO11_pose | 53.3 ms | **18.8** | 720 |
+| YOLO11_seg | 90.0 ms | **11.1** | 632 |
+| YOLO26n_depth | 94.4 ms | **10.6** | 580 |
 
-**Параллельно (все 4):**
+**In parallel (all 4):**
 
-| Метрика | Значение |
+| Metric | Value |
 |---|---|
-| Общий FPS камеры | **12.5** |
-| Каждая модель | **5.5 FPS** |
+| Total camera FPS | **12.5** |
+| Each model | **5.5 FPS** |
 | CPU avg | **14.3%** |
 | CPU max | **26.4%** |
 | RAM | 5.3% |
 | TEMP max | **36.3 °C** |
 
-**Примечание:** FPS в таблице — это FPS инференса модели (сколько кадров обрабатывает NPU). FPS камеры на экране (в OSD) — может отличаться из-за просадки при параллельной работе.
+**Note:** the FPS in the table is the model's inference FPS (how many frames the NPU processes). The on-screen camera FPS (in the OSD) may differ due to the drop during parallel work.
 
-### Сравнение JPEG vs RAW
+### JPEG vs RAW comparison
 
-| Модель | JPEG (avg / FPS) | RAW (avg / FPS) | Прирост |
+| Model | JPEG (avg / FPS) | RAW (avg / FPS) | Gain |
 |---|---|---|---|
-| YOLO26s | 90.9 мс / 11.0 | **67.3 мс / 14.9** | +35% |
-| YOLO11_pose | 83.7 мс / 12.0 | **53.3 мс / 18.8** | +57% |
-| YOLO11_seg | 113.8 мс / 8.8 | **90.0 мс / 11.1** | +26% |
-| YOLO26n_depth | 117.3 мс / 8.5 | **94.4 мс / 10.6** | +25% |
+| YOLO26s | 90.9 ms / 11.0 | **67.3 ms / 14.9** | +35% |
+| YOLO11_pose | 83.7 ms / 12.0 | **53.3 ms / 18.8** | +57% |
+| YOLO11_seg | 113.8 ms / 8.8 | **90.0 ms / 11.1** | +26% |
+| YOLO26n_depth | 117.3 ms / 8.5 | **94.4 ms / 10.6** | +25% |
 
 **CPU max:** 100% -> 26.4% (-74%).
 
-**GIL:** в параллельном режиме RAW даёт 12.5 FPS камеры (JPEG — 15.0). Причина — GIL в Python (копирование больших буферов). Решение (на будущее): `multiprocessing` или C++ раскидыватель.
+**GIL:** in parallel mode RAW gives 12.5 camera FPS (JPEG — 15.0). The cause — the GIL in Python (copying large buffers). Solution (for the future): `multiprocessing` or a C++ dispatcher.
 
-## 🚧 Что осталось
+## 🚧 What's left / Roadmap
 
-### Сделано
+### Done
 
-### Сделано
+### Done
 
-- [x] **Пересборка Armbian с PR #10835** — GPU, VPU, H.264, CSI.
-- [x] **CQE-баг eMMC** — HS400 @ 150 МГц (205 МБ/с).
-- [x] **Расширение eMMC** до 29 ГБ.
+- [x] **Rebuilt Armbian with PR #10835** — GPU, VPU, H.264, CSI.
+- [x] **eMMC CQE bug** — HS400 @ 150 MHz (205 MB/s).
+- [x] **eMMC expansion** to 29 GB.
 - [x] **`TimeoutStopSec=5`**, **`KillMode=control-group`**, **`SendSIGKILL=yes`**.
-- [x] **Обработчик `SIGTERM`** в `app.py`.
-- [x] **Запись видео с параллельным потоком** — GStreamer `tee` + `avenc_mjpeg` + `.mkv`.
-- [x] **NVMe SSD + SPI Flash** — загрузка с NVMe (570 МБ/с) без eMMC.
-- [x] **Универсальный auto-detect FPS** для камеры.
-- [x] **YOLO26s** — детекция (PCQ, RAW, ~53 мс).
-- [x] **YOLO11_pose** — 17 keypoints (uint8, RAW, ~42 мс).
-- [x] **YOLO11_seg** — сегментация (uint8, RAW, ~70 мс).
-- [x] **YOLO26n_depth** — карта глубины (PCQ, RAW, ~77 мс).
-- [x] **4 NPU-сервиса** + 4 Python-клиента (RAW BGR).
-- [x] **Кнопки DEPTH/SEG/ARUCO** в веб-интерфейсе.
-- [x] **ArUco-маркеры** — детекция (OpenCV CPU, ±1 см на 1.35 м).
-- [x] **Калибровка камеры** — RMS=0.3475.
-- [x] **Фиксация фокуса** камеры (671).
-- [x] **Стресс-тест** — 4 модели, 720p60, CPU 14.3% avg, TEMP 36.3 °C.
-- [x] **MediaPipe HAND GS** — жесты рук (MediaPipe 0.10.14).
-- [x] **MP POSE (угол локтя)** — FOLLOW/HOLD через YOLO11_pose.
-- [x] **MP FACE (кивок/поворот)** — MediaPipe Face Landmarker.
-- [x] **Emergency Stop** — кнопка STOP на Orange Pi и ESP32.
-- [x] **Индикация батареи** — 4 цвета (зелёный/жёлтый/оранжевый/красный).
+- [x] **`SIGTERM` handler** in `app.py`.
+- [x] **Video recording with a parallel stream** — GStreamer `tee` + `avenc_mjpeg` + `.mkv`.
+- [x] **NVMe SSD + SPI Flash** — booting from NVMe (570 MB/s) without eMMC.
+- [x] **Universal auto-detect FPS** for the camera.
+- [x] **YOLO26s** — detection (PCQ, RAW, ~53 ms).
+- [x] **YOLO11_pose** — 17 keypoints (uint8, RAW, ~42 ms).
+- [x] **YOLO11_seg** — segmentation (uint8, RAW, ~70 ms).
+- [x] **YOLO26n_depth** — depth map (PCQ, RAW, ~77 ms).
+- [x] **4 NPU services** + 4 Python clients (RAW BGR).
+- [x] **DEPTH/SEG/ARUCO buttons** in the web interface.
+- [x] **ArUco markers** — detection (OpenCV CPU, ±1 cm at 1.35 m).
+- [x] **Camera calibration** — RMS=0.3475.
+- [x] **Camera focus lock** (671).
+- [x] **Stress test** — 4 models, 720p60, CPU 14.3% avg, TEMP 36.3 °C.
+- [x] **MediaPipe HAND GS** — hand gestures (MediaPipe 0.10.14).
+- [x] **MP POSE (elbow angle)** — FOLLOW/HOLD via YOLO11_pose.
+- [x] **MP FACE (nod/turn)** — MediaPipe Face Landmarker.
+- [x] **Emergency Stop** — STOP button on the Orange Pi and ESP32.
+- [x] **Battery indication** — 4 colors (green/yellow/orange/red).
 
 
 
-### Ближайшее
+### Upcoming
 
-- [x] **GIL** — узкое место параллельного RAW
-- [x] **Мульти-клиент для NPU-сервера** (сейчас 1 клиент за раз).
-- [x] **CSI-камера** — вторая камера (обзорная, на PT).
-- [x] **GPU** — ускорение OpenCV (OpenCL).
-- [x] **Переключатель камер** — USB / CSI в веб-интерфейсе.
-- [x] **ArUco-маркеры** — логика парковки.
-- [x] **Лидар D500** — SLAM + навигация.
-- [x] **ESP32 (ИК, сонары)** — код для прошивки.
+- [x] **GIL** — bottleneck of parallel RAW
+- [x] **Multi-client for the NPU server** (currently 1 client at a time).
+- [x] **CSI camera** — second camera (overview, on the PT).
+- [x] **GPU** — OpenCV acceleration (OpenCL).
+- [x] **Camera switcher** — USB / CSI in the web interface.
+- [x] **ArUco markers** — parking logic.
+- [x] **D500 LiDAR** — SLAM + navigation.
+- [x] **ESP32 (IR, sonars)** — code for flashing.
 
-### Долгосрочное (из ROADMAP)
+### Long-term (from ROADMAP)
 
-- [x] **MediaPipe Pose -> YOLO11_pose (NPU)** — выполнено.
-- [x] **MediaPipe Face** — заменить на NPU (по аналогии с pose).
-- [x] **Лидар D500** — драйвер напрямую в `cv_ctrl.py` (без ROS2).
-- [x] **Sensor Fusion** — лидар + depth в Python-воркере.
-- [ ] **SLAM** — Hector SLAM (лёгкий порт, без ROS2).
-- [ ] **Навигация** — VFH или Bug-алгоритм (без Nav2).
-- [x] **Лидарная защита** — стоп < 0.4 м.
-- [ ] **Автопилот** — визуальная одометрия.
-- [ ] **Камера глубины** — Orbbec Gemini 335 (когда проект поедет).
-- [ ] **Голосовое управление** — через `pyttsx3` + распознавание.
+- [x] **MediaPipe Pose -> YOLO11_pose (NPU)** — done.
+- [x] **MediaPipe Face** — replace with NPU (by analogy with pose).
+- [x] **D500 LiDAR** — driver directly in `cv_ctrl.py` (without ROS2).
+- [x] **Sensor Fusion** — LiDAR + depth in a Python worker.
+- [ ] **SLAM** — Hector SLAM (lightweight port, without ROS2).
+- [ ] **Navigation** — VFH or the Bug algorithm (without Nav2).
+- [x] **LiDAR protection** — stop < 0.4 m.
+- [ ] **Autopilot** — visual odometry.
+- [ ] **Depth camera** — Orbbec Gemini 335 (once the project gets going).
+- [ ] **Voice control** — via `pyttsx3` + recognition.
 
-**Подробный план:** [ROADMAP.md](https://github.com/ZHNovell/ugv_rpi/blob/main/ROADMAP.md)
-
-
+**Detailed plan:** [ROADMAP.md](https://github.com/ZHNovell/ugv_rpi/blob/main/ROADMAP.md)
 
 
 
-## 📅 История изменений
 
-> **Полная история проекта:** [PROJECT.md](https://github.com/ZHNovell/ugv_rpi/blob/main/PROJECT.md)
+## 📅 Changelog
 
-- **2026-09-28:** Первый запуск Orange Pi 4 Pro, UART7, I2C2, NPU.
-- **2026-10-01:** Ручное копирование на eMMC, CQE-фикс (150 МГц).
-- **2026-10-02:** GStreamer `tee` — запись без прерывания.
-- **2026-10-03:** Переключение 1080p30/720p60.
-- **2026-10-05:** YOLO11s INT8 на NPU.
+> **Full project history:** [PROJECT.md](https://github.com/ZHNovell/ugv_rpi/blob/main/PROJECT.md)
+
+- **2026-09-28:** First launch of Orange Pi 4 Pro, UART7, I2C2, NPU.
+- **2026-10-01:** Manual copy to eMMC, CQE fix (150 MHz).
+- **2026-10-02:** GStreamer `tee` — recording without interruption.
+- **2026-10-03:** 1080p30/720p60 switching.
+- **2026-10-05:** YOLO11s INT8 on the NPU.
 - **2026-10-06:** YOLO26s (PCQ), YOLO11_pose.
-- **2026-10-07:** CQE-баг побеждён (150 МГц, 205 МБ/с).
-- **2026-10-08:** Auto-detect FPS камеры, YOLO26_depth, YOLO11_seg.
-- **2026-10-09:** 4 NPU-сервиса, NVMe + SPI Flash.
-- **2026-10-10:** Стресс-тест, калибровка камеры, RAW BGR для 4 серверов.
-- **2026-10-24:** MediaPipe 0.10.14 (HAND GS), MP POSE (угол локтя), MP FACE (кивок/поворот), Emergency Stop.
-- **2026-10-25:** Адаптивный подъём PT, индикация батареи (4 цвета), кнопка STOP на Orange Pi и ESP32.
-- **2026-11-16:** Перенос seg/depth на Radxa AICore AX-M1 (AXCL-серверы).
-- **2026-11-18:** Перенос pose на AX-M1, фикс камеры 1080p@60, реструктуризация проекта (core/modules/scripts/tools/).
+- **2026-10-07:** CQE bug defeated (150 MHz, 205 MB/s).
+- **2026-10-08:** Camera auto-detect FPS, YOLO26_depth, YOLO11_seg.
+- **2026-10-09:** 4 NPU services, NVMe + SPI Flash.
+- **2026-10-10:** Stress test, camera calibration, RAW BGR for the 4 servers.
+- **2026-10-24:** MediaPipe 0.10.14 (HAND GS), MP POSE (elbow angle), MP FACE (nod/turn), Emergency Stop.
+- **2026-10-25:** Adaptive PT lift, battery indication (4 colors), STOP button on the Orange Pi and ESP32.
+- **2026-11-16:** Moving seg/depth to the Radxa AICore AX-M1 (AXCL servers).
+- **2026-11-18:** Moving pose to the AX-M1, 1080p@60 camera fix, project restructuring (core/modules/scripts/tools/).
 
 
-## 🔗 Ссылки
+## 🔗 Links
 
 **GitHub:**
-- Форк: [ZHNovell/ugv_rpi](https://github.com/ZHNovell/ugv_rpi)
-- Оригинал: [waveshareteam/ugv_rpi](https://github.com/waveshareteam/ugv_rpi)
+- Fork: [ZHNovell/ugv_rpi](https://github.com/ZHNovell/ugv_rpi)
+- Original: [waveshareteam/ugv_rpi](https://github.com/waveshareteam/ugv_rpi)
 
-**Аппаратура:**
+**Hardware:**
 - [Orange Pi 4 Pro](http://www.orangepi.org/html/hardWare/computerAndMicrocontrollers/details/Orange-Pi-4-Pro.html)
 - [Waveshare WAVE ROVER](https://www.waveshare.com/wiki/WAVE_ROVER)
 - [General Driver for Robots](https://www.waveshare.com/wiki/General_Driver_for_Robots)
 - [2-Axis Pan-Tilt](https://www.waveshare.com/wiki/2-Axis_Pan-Tilt_Camera_Module)
 
 **Armbian:**
-- [armbian/build](https://github.com/armbian/build) — поддержка Orange Pi 4 Pro в основной ветке
+- [armbian/build](https://github.com/armbian/build) — Orange Pi 4 Pro support in the main branch
 
 **NPU / Ultralytics:**
 - [Allwinner Model Zoo v1.1.0](https://www.aw-ol.com/)
@@ -1489,21 +1489,21 @@ if (self.calib_w != frame_w) or (self.calib_h != frame_h):
 - [Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26/)
 - [COCO Keypoints](https://cocodataset.org/#keypoints-2020)
 
-**JSON-команды:**
+**JSON commands:**
 - [Waveshare JSON Instruction Set](https://www.waveshare.com/wiki/08_Slave_Device_JSON_Instruction_Set)
 
-## 👥 Авторы
+## 👥 Authors
 
-- **ZHNovell** — адаптация под Orange Pi 4 Pro, NPU, веб-интерфейс.
-- **Waveshare** — оригинальный `ugv_rpi`.
-- **deece** — поддержка A733 в Armbian.
-- **ijiki16** — GPU модули на A733.
+- **ZHNovell** — adaptation for Orange Pi 4 Pro, NPU, web interface.
+- **Waveshare** — the original `ugv_rpi`.
+- **deece** — A733 support in Armbian.
+- **ijiki16** — GPU modules on the A733.
 - **Allwinner** — Model Zoo v1.1.0, ACUITY Toolkit.
-- **AXERA-TECH** — axcl-samples (примеры AXCL).
+- **AXERA-TECH** — axcl-samples (AXCL examples).
 
 ---
 
-**Последнее обновление:** 2026-11-19
+**Last update:** 2026-11-19
 
 **PROJECT:** [PROJECT.md](https://github.com/ZHNovell/ugv_rpi/blob/main/PROJECT.md)
 **ROADMAP:** [ROADMAP.md](https://github.com/ZHNovell/ugv_rpi/blob/main/ROADMAP.md)

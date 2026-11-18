@@ -9,7 +9,7 @@
 
 <img width="1088" height="721" alt="UGV Robot" src="https://github.com/user-attachments/assets/368fbf34-2087-4e6b-b819-b5fca5f83acd" />
 
-**UGV-робот** на **Orange Pi 4 Pro** (Allwinner A733, NPU 3 TOPS) с **4 NPU-моделями**: детекция, позы, глубина, сегментация. Работает **автономно** (SPI + NVMe), управляется через **веб-интерфейс**.
+**UGV-робот** на **Orange Pi 4 Pro** (Allwinner A733, NPU 3 TOPS) с опциональным ускорителем **Radxa AICore AX-M1** (AX650N) и **4 NPU-моделями**: детекция, позы, глубина, сегментация. Работает **автономно** (SPI + NVMe), управляется через **веб-интерфейс**.
 ## 📋 Содержание
 
 1. [Аппаратная платформа](#-аппаратная-платформа)
@@ -40,9 +40,10 @@
 - **Orange Pi 4 Pro** — Allwinner A733, 8 ядер (4×A76 + 4×A55), 12 ГБ RAM, NPU 3 TOPS INT8.
 - **General Driver for Robots** — Waveshare, ESP32-WROOM-32UE, 2×MX1919, INA219, OLED SSD1306 (0x3C).
 - **2-Axis Pan-Tilt Camera Module** — сервоприводы ST3215, UART.
-- **Шасси WAVE ROVER** — 4 мотора, 4 энкодера, 3S Li-Ion UPS.
+- **Шасси WAVE ROVER / UGV Rover** — 4 мотора, 4 энкодера, 3S Li-Ion UPS.
 - **USB-камера** — навигационная (UVC).
 - **CSI-камера** — опционально (обзорная).
+- **Radxa AICore AX-M1** — PCIe-ускоритель на AX650N (опционально, для pose/seg/depth).
 
 **Распиновка (40-pin):**
 
@@ -95,19 +96,46 @@
 - **ArUco** — через OpenCV (CPU), не NPU.
 - Видео через GStreamer `tee` — превью и запись одновременно.
 - CV-режимы переключаются JSON-командами (`{"T":10304}` = OBJECTS, `{"T":10309}` = MP POSE, `{"T":10310}` = DEPTH, `{"T":10311}` = SEG, `{"T":10312}` = ARUCO).
+## 📁 Структура проекта
+
+```
+ugv_rpi/
+├── app.py                 # точка входа (Flask + Socket.IO)
+├── config.yaml            # конфигурация
+├── requirements.txt
+├── core/                  # основные модули
+│   ├── cv_ctrl.py         # CV-контроллер
+│   ├── base_ctrl.py       # UART → ESP32
+│   ├── gst_stream.py      # GStreamer-пайплайн
+│   ├── os_info.py         # мониторинг
+│   ├── audio_ctrl.py
+│   └── pt_stabilizer.py
+├── modules/               # NPU-клиенты (UNIX-сокеты)
+│   ├── npu_client.py      # детекция
+│   ├── npu_pose_client.py
+│   ├── npu_seg_client.py
+│   ├── npu_depth_client.py
+│   └── aruco_client.py
+├── scripts/               # shell-скрипты
+├── tools/                 # утилиты (калибровка, тесты)
+├── axcl_servers/          # C++ AXCL-серверы (AX-M1)
+├── templates/             # веб-интерфейс
+├── controllers/           # джойстик, RoArm
+├── models/                # модели (MediaPipe, калибровка)
+├── models_axcl/           # модели AX-M1 (.axmodel)
+├── yolo*/                 # NPU-серверы A733 + конвертация
+└── ugv-env/               # виртуальное окружение
+```
+
 ## 🛠️ Сборка Armbian
 
-**Репозиторий для сборки:**
-- [PR #10835 (GPU/VPU/NPU/ISP)](https://github.com/armbian/build/pull/10835)
-- [Ветка ijiki16](https://github.com/ijiki16/build/tree/sun60iw2-4pro-gpu-desktop-upstream)
+**Репозиторий для сборки:** [armbian/build](https://github.com/armbian/build) — поддержка Orange Pi 4 Pro уже в основной ветке.
 
 **Команды сборки:**
 
 ```bash
 git clone https://github.com/armbian/build.git
-cd armbian-build
-git fetch origin pull/10835/head:pr-10835
-git checkout pr-10835
+cd build
 
 ./compile.sh BOARD=orangepi4pro BRANCH=vendor RELEASE=trixie \
   BUILD_DESKTOP=no BUILD_MINIMAL=yes \
@@ -441,28 +469,31 @@ wget -O /tmp/hand_landmarker.task https://storage.googleapis.com/mediapipe-model
 
 ## 🧠 NPU-серверы
 
-**4 NPU-сервера** через UNIX-сокеты. Все работают параллельно.
+**Сравнение двух вариантов размещения моделей:**
 
-| Сервис | Модель | Сокет | Время | Квантизация |
-|---|---|---|---|---|
-| `npu-server.service` | YOLO26s (детекция) | `/tmp/npu11_raw.sock` | ~53 мс | PCQ |
-| `npu-pose-server.service` | YOLO11_pose (позы) | `/tmp/npu_pose_raw.sock` | ~42 мс | uint8 |
-| `npu-seg-server.service` | YOLO11_seg (маски) | `/tmp/npu_seg_raw.sock` | ~70 мс | uint8 |
-| `npu-depth-server.service` | YOLO26n_depth (глубина) | `/tmp/npu_depth_raw.sock` | ~77 мс | PCQ |
+| Модель | Встроенный NPU (A733) | Radxa AICore AX-M1 |
+|---|---|---|
+| Детекция | YOLO26s — `/tmp/npu11.sock` | — |
+| Позы | YOLO11s-pose — `/tmp/npu_pose_raw.sock` | YOLO26m-pose — `/tmp/npu_pose_axcl.sock` |
+| Сегментация | YOLO11s-seg — `/tmp/npu_seg_raw.sock` | YOLO26m-seg — `/tmp/npu_seg_axcl.sock` |
+| Глубина | YOLO26n-depth — `/tmp/npu_depth_raw.sock` | YOLO26m-depth — `/tmp/npu_depth_axcl.sock` |
 
-**Python-клиенты (в корне):**
-- `npu_client.py` — YOLO26s
-- `npu_pose_client.py` — YOLO11_pose
-- `npu_seg_client.py` — YOLO11_seg
-- `npu_depth_client.py` — YOLO26n_depth
+**Протокол (RAW BGR)** — одинаков для обоих вариантов:
 
-**Протокол (RAW BGR):**
 ```
 Клиент -> Сервер: [4 байта BE: width] [4 байта BE: height] [4 байта BE: channels] [raw BGR]
 Сервер -> Клиент: [4 байта BE: длина JSON] [JSON bytes]
 ```
 
-### YOLO26s (детекция объектов)
+### Вариант 1: встроенный NPU (A733)
+
+Все 4 модели работают на встроенном NPU A733. Python-клиенты — в `modules/`:
+- `npu_client.py` — YOLO26s
+- `npu_pose_client.py` — YOLO11_pose
+- `npu_seg_client.py` — YOLO11_seg
+- `npu_depth_client.py` — YOLO26n_depth
+
+#### YOLO26s (детекция объектов)
 
 **Пайплайн конвертации:**
 
@@ -494,7 +525,7 @@ cd /root/ugv_rpi/yolo26_raw/
 3. Убрать `_GLIBCXX_USE_CXX11_ABI=0`.
 4. `MODEL_ZOO_HOME_DIR` — абсолютный путь.
 5. Исключить лишние `.cpp` (main, yolo11_6_*).
-### YOLO11_pose (позы)
+#### YOLO11_pose (позы)
 
 **Пайплайн:**
 1. `yolo11s-pose.pt` -> ONNX (opset 15).
@@ -517,7 +548,7 @@ cd /root/ugv_rpi/yolo11_pose_raw/
 ./build_native.sh
 ```
 
-### YOLO11_seg (сегментация)
+#### YOLO11_seg (сегментация)
 
 **Пайплайн:**
 1. Скачать `yolo11s-seg_10.onnx` (Allwinner, 40 МБ) — уже обрезан.
@@ -539,7 +570,7 @@ cd /root/ugv_rpi/yolo11_seg_raw/
 ./build_native.sh
 ```
 
-### YOLO26n_depth (карта глубины)
+#### YOLO26n_depth (карта глубины)
 
 **Пайплайн:**
 1. Скачать `yolo26n-depth.pt` (Ultralytics, 12.4 МБ).
@@ -562,7 +593,7 @@ cd /root/ugv_rpi/yolo11_seg_raw/
 cd /root/ugv_rpi/yolo26_depth_raw/
 ./build_native.sh
 ```
-### Процесс перевода сервера на RAW BGR
+#### Процесс перевода сервера на RAW BGR
 
 Для каждого из 4 серверов:
 
@@ -684,6 +715,27 @@ sudo systemctl restart npu-server.service
 ls -la /tmp/npu11_raw.sock
 ps aux | grep npu_server | grep -v grep
 ```
+### Вариант 2: Radxa AICore AX-M1
+
+Детекция остаётся на A733, а pose/seg/depth работают на **AX-M1 (AX650N)** через C++ AXCL-серверы в `axcl_servers/`.
+
+| Сервис | Модель (`models_axcl/`) | Сокет |
+|---|---|---|
+| `npu-pose-axcl-server.service` | `yolo26m-pose_npu3.axmodel` | `/tmp/npu_pose_axcl.sock` |
+| `npu-seg-axcl-server.service` | `yolo26m-seg.axmodel` | `/tmp/npu_seg_axcl.sock` |
+| `npu-depth-axcl-server.service` | `yolo26m-depth.axmodel` | `/tmp/npu_depth_axcl.sock` |
+
+**Сборка:**
+
+```bash
+cd /root/ugv_rpi/axcl_servers
+./build.sh
+```
+
+Модели (`.axmodel`, в `models_axcl/`) скачиваются с Hugging Face (организация AXERA-TECH). Подробнее — в `axcl_servers/README.md`.
+
+AX-M1 подключается по PCIe; модули ядра AXCL (`ax_pcie_host_dev`, `axcl_host` и др.) подгружаются через `ExecStartPre` в сервисах.
+
 ## 🔧 Адаптация кода
 
 ### `base_ctrl.py`
@@ -993,7 +1045,7 @@ Type=simple
 User=root
 WorkingDirectory=/root/ugv_rpi/yolo26_raw
 Environment=LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733
-ExecStartPre=/root/ugv_rpi/prepare_shm.sh
+ExecStartPre=/root/ugv_rpi/scripts/prepare_shm.sh
 ExecStart=/root/ugv_rpi/yolo26_raw/npu_server /dev/shm/yolo26s_6_pcq_a733.nb
 Restart=always
 RestartSec=3
@@ -1005,21 +1057,25 @@ SendSIGKILL=yes
 WantedBy=multi-user.target
 ```
 
-### `npu-pose-server.service`
+### `npu-pose-axcl-server.service`
 
 ```ini
 [Unit]
-Description=NPU Pose Server for YOLO11_pose (A733)
+Description=NPU Pose Server on AX-M1 (AXCL) - YOLO26m-pose
 After=network.target
 Before=ugv.service
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/ugv_rpi/yolo11_pose_raw
-Environment=LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733
-ExecStartPre=/bin/sh -c 'cp /root/ugv_rpi/yolo11_pose_raw/yolo11s-pose_9_uint8_a733.nb /dev/shm/ 2>/dev/null || true'
-ExecStart=/root/ugv_rpi/yolo11_pose_raw/npu_pose_server /dev/shm/yolo11s-pose_9_uint8_a733.nb
+WorkingDirectory=/root/ugv_rpi/axcl-samples/build/examples/axcl
+ExecStartPre=/sbin/modprobe ax_pcie_host_dev
+ExecStartPre=/sbin/modprobe axcl_host
+ExecStartPre=/sbin/modprobe ax_pcie_mmb
+ExecStartPre=/sbin/modprobe ax_pcie_msg
+ExecStartPre=/sbin/modprobe ax_pcie_net_host
+ExecStartPre=/sbin/modprobe ax_pcie_p2p_rc
+ExecStart=/root/ugv_rpi/axcl-samples/build/examples/axcl/axcl_npu_pose_server /root/ugv_rpi/models_axcl/yolo26m-pose_npu3.axmodel
 Restart=always
 RestartSec=3
 TimeoutStopSec=5
@@ -1030,21 +1086,25 @@ SendSIGKILL=yes
 WantedBy=multi-user.target
 ```
 
-### `npu-seg-server.service`
+### `npu-seg-axcl-server.service`
 
 ```ini
 [Unit]
-Description=NPU Seg Server for YOLO11_seg (A733)
+Description=NPU Seg Server on AX-M1 (AXCL) - YOLO26m-seg
 After=network.target
 Before=ugv.service
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/ugv_rpi/yolo11_seg_raw
-Environment=LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733
-ExecStartPre=/bin/sh -c 'cp /root/ugv_rpi/yolo11_seg_raw/model/yolo11s-seg_10_uint8_a733.nb /dev/shm/ 2>/dev/null || true'
-ExecStart=/root/ugv_rpi/yolo11_seg_raw/npu_seg_server /dev/shm/yolo11s-seg_10_uint8_a733.nb
+WorkingDirectory=/root/ugv_rpi/axcl-samples/build/examples/axcl
+ExecStartPre=/sbin/modprobe ax_pcie_host_dev
+ExecStartPre=/sbin/modprobe axcl_host
+ExecStartPre=/sbin/modprobe ax_pcie_mmb
+ExecStartPre=/sbin/modprobe ax_pcie_msg
+ExecStartPre=/sbin/modprobe ax_pcie_net_host
+ExecStartPre=/sbin/modprobe ax_pcie_p2p_rc
+ExecStart=/root/ugv_rpi/axcl-samples/build/examples/axcl/axcl_npu_seg_server /root/ugv_rpi/models_axcl/yolo26m-seg.axmodel
 Restart=always
 RestartSec=3
 TimeoutStopSec=5
@@ -1055,21 +1115,25 @@ SendSIGKILL=yes
 WantedBy=multi-user.target
 ```
 
-### `npu-depth-server.service`
+### `npu-depth-axcl-server.service`
 
 ```ini
 [Unit]
-Description=NPU Depth Server for YOLO26n_depth (A733)
+Description=NPU Depth Server on AX-M1 (AXCL) - YOLO26m-depth
 After=network.target
 Before=ugv.service
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/ugv_rpi/yolo26_depth_raw
-Environment=LD_LIBRARY_PATH=/root/awnpu_model_zoo-v0.9.0-20260116-83a67d4b/common/npuruntime/lib_linux_aarch64/A733
-ExecStartPre=/bin/sh -c 'cp /root/ugv_rpi/yolo26_depth_raw/model/yolo26n-depth_pcq_a733.nb /dev/shm/ 2>/dev/null || true'
-ExecStart=/root/ugv_rpi/yolo26_depth_raw/npu_depth_server /dev/shm/yolo26n-depth_pcq_a733.nb
+WorkingDirectory=/root/ugv_rpi/axcl-samples/build/examples/axcl
+ExecStartPre=/sbin/modprobe ax_pcie_host_dev
+ExecStartPre=/sbin/modprobe axcl_host
+ExecStartPre=/sbin/modprobe ax_pcie_mmb
+ExecStartPre=/sbin/modprobe ax_pcie_msg
+ExecStartPre=/sbin/modprobe ax_pcie_net_host
+ExecStartPre=/sbin/modprobe ax_pcie_p2p_rc
+ExecStart=/root/ugv_rpi/axcl-samples/build/examples/axcl/axcl_npu_depth_server /root/ugv_rpi/models_axcl/yolo26m-depth.axmodel
 Restart=always
 RestartSec=3
 TimeoutStopSec=5
@@ -1085,14 +1149,14 @@ WantedBy=multi-user.target
 ```ini
 [Unit]
 Description=UGV Robot App
-After=network.target npu-server.service npu-pose-server.service npu-seg-server.service npu-depth-server.service
-Requires=npu-server.service npu-pose-server.service npu-seg-server.service npu-depth-server.service
+After=network.target npu-server.service npu-pose-axcl-server.service npu-seg-axcl-server.service npu-depth-axcl-server.service
+Requires=npu-server.service npu-pose-axcl-server.service npu-seg-axcl-server.service npu-depth-axcl-server.service
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/root/ugv_rpi
-ExecStartPre=/root/ugv_rpi/prepare_shm.sh
+ExecStartPre=/root/ugv_rpi/scripts/prepare_shm.sh
 ExecStartPre=/bin/sh -c "v4l2-ctl -d /dev/video0 -c focus_automatic_continuous=0 && v4l2-ctl -d /dev/video0 -c focus_absolute=671"
 ExecStart=/root/ugv_rpi/ugv-env/bin/python /root/ugv_rpi/app.py
 Restart=on-failure
@@ -1109,8 +1173,8 @@ WantedBy=multi-user.target
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable npu-server.service npu-pose-server.service npu-seg-server.service npu-depth-server.service ugv.service
-sudo systemctl start npu-server.service npu-pose-server.service npu-seg-server.service npu-depth-server.service ugv.service
+sudo systemctl enable npu-server.service npu-pose-axcl-server.service npu-seg-axcl-server.service npu-depth-axcl-server.service ugv.service
+sudo systemctl start npu-server.service npu-pose-axcl-server.service npu-seg-axcl-server.service npu-depth-axcl-server.service ugv.service
 ```
 
 **Логи:**
@@ -1146,7 +1210,7 @@ journalctl -u ugv.service -f
 | Color | 10305 | Детекция цвета |
 | Hand GS | 10306 | Жесты рук |
 | Auto | 10307 | Авто-режим |
-| MP Face | 10308 | MediaPipe Face (не работает) |
+| MP Face | 10308 | MediaPipe Face Landmarker (кивок/поворот) |
 | MP Pose | 10309 | NPU YOLO11_pose |
 | Depth | 10310 | NPU YOLO26n_depth |
 | Seg | 10311 | NPU YOLO11_seg |
@@ -1201,7 +1265,7 @@ def usb_camera_detection(self):
 - Находит секцию MJPG.
 - Ищет нужное разрешение.
 - Возвращает максимальный FPS.
-- **Ограничение:** 1080p — максимум 30 fps (USB 2.0 не тянет 60).
+- **Ограничение:** 1080p — зависит от камеры (до 60 fps).
 
 **`GstStream.switch_mode(width, height, fps=None)`:**
 - Если `fps` не задан — вызывает `detect_max_fps`.
@@ -1400,6 +1464,8 @@ if (self.calib_w != frame_w) or (self.calib_h != frame_h):
 - **2026-10-10:** Стресс-тест, калибровка камеры, RAW BGR для 4 серверов.
 - **2026-10-24:** MediaPipe 0.10.14 (HAND GS), MP POSE (угол локтя), MP FACE (кивок/поворот), Emergency Stop.
 - **2026-10-25:** Адаптивный подъём PT, индикация батареи (4 цвета), кнопка STOP на Orange Pi и ESP32.
+- **2026-11-16:** Перенос seg/depth на Radxa AICore AX-M1 (AXCL-серверы).
+- **2026-11-18:** Перенос pose на AX-M1, фикс камеры 1080p@60, реструктуризация проекта (core/modules/scripts/tools/).
 
 
 ## 🔗 Ссылки
@@ -1415,8 +1481,7 @@ if (self.calib_w != frame_w) or (self.calib_h != frame_h):
 - [2-Axis Pan-Tilt](https://www.waveshare.com/wiki/2-Axis_Pan-Tilt_Camera_Module)
 
 **Armbian:**
-- [PR #10835 (GPU/VPU/NPU/ISP)](https://github.com/armbian/build/pull/10835)
-- [Ветка ijiki16](https://github.com/ijiki16/build/tree/sun60iw2-4pro-gpu-desktop-upstream)
+- [armbian/build](https://github.com/armbian/build) — поддержка Orange Pi 4 Pro в основной ветке
 
 **NPU / Ultralytics:**
 - [Allwinner Model Zoo v1.1.0](https://www.aw-ol.com/)
@@ -1434,10 +1499,11 @@ if (self.calib_w != frame_w) or (self.calib_h != frame_h):
 - **deece** — поддержка A733 в Armbian.
 - **ijiki16** — GPU модули на A733.
 - **Allwinner** — Model Zoo v1.1.0, ACUITY Toolkit.
+- **AXERA-TECH** — axcl-samples (примеры AXCL).
 
 ---
 
-**Последнее обновление:** 2026-10-10
+**Последнее обновление:** 2026-11-19
 
 **PROJECT:** [PROJECT.md](https://github.com/ZHNovell/ugv_rpi/blob/main/PROJECT.md)
 **ROADMAP:** [ROADMAP.md](https://github.com/ZHNovell/ugv_rpi/blob/main/ROADMAP.md)

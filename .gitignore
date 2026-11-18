@@ -71,3 +71,11 @@ yolo26_raw/yolo26s_6_pcq_a733.nb
 
 # === Модели .nb (бинарные, большие — не коммитим) ===
 **/*.nb
+
+# Локальные модели AX-M1 и бинарники (не коммитим)
+models_axcl/*.axmodel
+axcl-samples/
+
+# Тестовые изображения
+templates/test_*.jpg
+templates/test_*.png

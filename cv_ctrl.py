@@ -498,8 +498,14 @@ class OpencvFuncs():
                         self.npu_pose_latest_frame = input_frame.copy()
                 elif self.cv_mode == f['code']['cv_seg']:
                     # cv_seg: YOLO26_seg работает в асинхронном потоке.
+                    # Ресайз: меньшая сторона 640, пропорции сохраняются (16:9 -> 1138x640)
                     with self.npu_seg_frame_lock:
-                        self.npu_seg_latest_frame = input_frame.copy()
+                        h, w = input_frame.shape[:2]
+                        if h <= w:
+                            nh, nw = 640, max(1, int(round(w * 640.0 / h)))
+                        else:
+                            nw, nh = 640, max(1, int(round(h * 640.0 / w)))
+                        self.npu_seg_latest_frame = cv2.resize(input_frame, (nw, nh))
                 elif self.cv_mode == f['code']['cv_depth']:
                     # cv_depth: YOLO26n_depth работает в асинхронном потоке.
                     with self.npu_depth_frame_lock:

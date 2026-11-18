@@ -497,7 +497,7 @@ class OpencvFuncs():
                     with self.npu_pose_frame_lock:
                         self.npu_pose_latest_frame = input_frame.copy()
                 elif self.cv_mode == f['code']['cv_seg']:
-                    # cv_seg: YOLO11_seg работает в асинхронном потоке.
+                    # cv_seg: YOLO26_seg работает в асинхронном потоке.
                     with self.npu_seg_frame_lock:
                         self.npu_seg_latest_frame = input_frame.copy()
                 elif self.cv_mode == f['code']['cv_depth']:
@@ -954,7 +954,7 @@ class OpencvFuncs():
         elif prev_mode == f['code']['mp_pose']:
             self._stop_npu_pose_worker()
 
-        # Управление NPU seg-потоком (YOLO11_seg)
+        # Управление NPU seg-потоком (YOLO26_seg)
         if self.cv_mode == f['code']['cv_seg']:
             self._start_npu_seg_worker()
         elif prev_mode == f['code']['cv_seg']:
@@ -1947,9 +1947,9 @@ class OpencvFuncs():
             except Exception as e:
                 print(f"[cv_ctrl._npu_pose_worker] error: {e}", flush=True)
 
-    # ============ NPU SEG (YOLO11_seg) ============
+    # ============ NPU SEG (YOLO26_seg) ============
     def _start_npu_seg_worker(self):
-        """Запускает асинхронный NPU-поток (YOLO11_seg)."""
+        """Запускает асинхронный NPU-поток (YOLO26_seg)."""
         if self.npu_seg_thread is not None and self.npu_seg_thread.is_alive():
             return
         self.npu_seg_stop_flag = False
@@ -1995,7 +1995,7 @@ class OpencvFuncs():
 
             try:
                 overlay_buffer = np.zeros_like(frame)
-                cv2.putText(overlay_buffer, 'NPU YOLO11_seg', (50, 50),
+                cv2.putText(overlay_buffer, 'NPU YOLO26_seg', (50, 50),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
                 detections = self.npu_seg_client.detect(frame)

@@ -395,9 +395,10 @@ class OpencvFuncs():
                     device='/dev/video0',
                     width=f['video']['default_res_w'],
                     height=f['video']['default_res_h'],
-                    fps=30
+                    fps=GstStream.detect_max_fps(f['video']['default_res_w'], f['video']['default_res_h'])
                 )
                 self.gst_stream.start()
+                self.camera_mode = f"{f['video']['default_res_h']}p{self.gst_stream.fps}"
                 print("[cv_ctrl] GstStream started for USB camera")
             except Exception as e:
                 print(f"[cv_ctrl] GstStream failed: {e}, falling back to OpenCV")

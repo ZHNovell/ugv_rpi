@@ -15,7 +15,7 @@ import time
 import cv2
 
 
-SOCKET_PATH = "/tmp/npu_pose_raw.sock"
+SOCKET_PATH = "/tmp/npu_pose_axcl.sock"
 
 
 class NPUPoseClient:

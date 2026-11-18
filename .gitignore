@@ -16,10 +16,10 @@ ugv-env/
 *.log
 /tmp/
 
-# MD-файлы (ты сказал не пушить)
-ROADMAP.md
-README.md
-PROJECT.md
+# MD-файлы (редактируются вручную на GitHub, не пушить с платы)
+/ROADMAP.MD
+/README.md
+/PROJECT.md
 
 # Медиа из тестов (не коммитим)
 templates/line_test.jpg

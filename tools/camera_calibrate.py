@@ -17,7 +17,7 @@ CHESSBOARD = (9, 6)
 SQUARE_SIZE = 0.030  # 30 мм = 0.030 м (ИЗМЕРЬ СВОЮ!)
 
 SAVE_DIR = '/root/ugv_rpi/calib_frames'
-OUTPUT = '/root/ugv_rpi/camera_calib.npz'
+OUTPUT = '/root/ugv_rpi/models/camera_calib.npz'
 
 
 def main():

@@ -3,7 +3,7 @@ import subprocess, re, netifaces
 import threading
 
 curpath = os.path.realpath(__file__)
-thisPath = os.path.dirname(curpath)
+thisPath = os.path.dirname(os.path.dirname(curpath))
 
 class SystemInfo(threading.Thread):
     """docstring for SystemInfo"""

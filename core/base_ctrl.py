@@ -9,7 +9,7 @@ import glob
 import numpy as np
 
 curpath = os.path.realpath(__file__)
-thisPath = os.path.dirname(curpath)
+thisPath = os.path.dirname(os.path.dirname(curpath))
 with open(thisPath + '/config.yaml', 'r') as yaml_file:
     f = yaml.safe_load(yaml_file)
 
@@ -28,7 +28,7 @@ class ReadLine:
 		self.sensor_data_max_len = 51
 
 		try:
-			self.lidar_ser = serial.Serial(glob.glob('/dev/ttyACM*')[0], 230400, timeout=1)
+			self.lidar_ser = serial.Serial('/dev/ttyACM1', 230400, timeout=1)  # D500/STL-19P
 			print("/dev/ttyACM* connected succeed")
 		except:
 			self.lidar_ser = None
@@ -125,7 +125,7 @@ class ReadLine:
 			self.lidar_distances.clear()
 		except Exception as e:
 			print(f"[base_ctrl.lidar_data_recv] error: {e}")
-			self.lidar_ser = serial.Serial(glob.glob('/dev/ttyACM*')[0], 230400, timeout=1)
+			self.lidar_ser = serial.Serial('/dev/ttyACM1', 230400, timeout=1)
 
 
 class BaseController:
@@ -159,11 +159,15 @@ class BaseController:
 						self.data_buffer = json.loads(part)
 						if 'T' in self.data_buffer:
 							self.base_data = self.data_buffer
-							if self.base_data["T"] == 1003:
-								print(self.base_data)
-								return self.base_data
+							self.data_buffer = None
+							if self.base_data['T'] == 1001:
+								v = self.base_data.get('v')
+								if isinstance(v, (int, float)):
+									self.base_voltage_status = v
+							return self.base_data
 					except json.JSONDecodeError:
 						continue
+			self.rl.clear_buffer()
 			return self.base_data
 		except Exception as e:
 			self.rl.clear_buffer()
@@ -177,12 +181,14 @@ class BaseController:
 
 
 	def send_command(self, data):
+		print(f"[send_command] {data}", flush=True)
 		self.command_queue.put(data)
 
 
 	def process_commands(self):
 		while True:
 			data = self.command_queue.get()
+			print(f"[process_commands] writing: {data}", flush=True)
 			self.ser.write((json.dumps(data) + '\n').encode("utf-8"))
 
 
@@ -269,7 +275,7 @@ class BaseController:
 
 if __name__ == '__main__':
 	# RPi5
-	base = BaseController('/dev/ttyS7', 115200)
+	base = BaseController('/dev/ttyUSB0', 115200)
 
 	# RPi4B
 	# base = BaseController('/dev/serial0', 115200)

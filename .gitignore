@@ -79,3 +79,4 @@ axcl-samples/
 # Тестовые изображения
 templates/test_*.jpg
 templates/test_*.png
+backups/

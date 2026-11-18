@@ -30,7 +30,7 @@ class ArucoClient:
 
         # Загружаем калибровку из файла (если есть)
         import os
-        calib_path = '/root/ugv_rpi/camera_calib.npz'
+        calib_path = '/root/ugv_rpi/models/camera_calib.npz'
         if os.path.exists(calib_path):
             data = np.load(calib_path)
             self.camera_matrix = data['camera_matrix'].copy()

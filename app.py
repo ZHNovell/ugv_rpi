@@ -1,4 +1,7 @@
 # import base_ctrl library
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'core'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'modules'))
 from base_ctrl import BaseController
 from controllers.joy_ctrl import JoystickReader, JoyTeleop
 import threading

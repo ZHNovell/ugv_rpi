@@ -15,7 +15,7 @@ CHESSBOARD = (5, 8)
 SQUARE_SIZE = 0.030  # ИЗМЕРЬ ЛИНЕЙКОЙ! (30 мм = 0.030 м)
 
 SAVE_DIR = '/root/ugv_rpi/calib_frames'
-OUTPUT = '/root/ugv_rpi/camera_calib.npz'
+OUTPUT = '/root/ugv_rpi/models/camera_calib.npz'
 
 TARGET_FRAMES = 25
 SAVE_INTERVAL = 1.5  # сек между сохранениями

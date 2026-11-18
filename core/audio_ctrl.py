@@ -9,11 +9,11 @@ import pyttsx3
 usb_connected = False
 
 curpath = os.path.realpath(__file__)
-thisPath = os.path.dirname(curpath)
+thisPath = os.path.dirname(os.path.dirname(curpath))
 with open(thisPath + '/config.yaml', 'r') as yaml_file:
     config = yaml.safe_load(yaml_file)
 
-current_path = os.path.abspath(os.path.dirname(__file__))
+current_path = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 
 try:
 	pygame.mixer.init()

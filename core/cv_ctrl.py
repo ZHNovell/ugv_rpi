@@ -36,7 +36,7 @@ except ImportError:
 
 # config file.
 curpath = os.path.realpath(__file__)
-thisPath = os.path.dirname(curpath)
+thisPath = os.path.dirname(os.path.dirname(curpath))
 with open(thisPath + '/config.yaml', 'r') as yaml_file:
     f = yaml.safe_load(yaml_file)
 

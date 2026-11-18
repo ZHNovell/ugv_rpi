@@ -80,3 +80,4 @@ axcl-samples/
 templates/test_*.jpg
 templates/test_*.png
 backups/
+/README.ru.md

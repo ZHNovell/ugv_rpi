@@ -17,7 +17,7 @@ args_config:
   pt_p_gain: 7.0
   pt_servo_acc: 0
   pt_servo_spd: 3000
-  slam_mode: true
+  slam_mode: false
   slow_speed: 0.2
 audio_config:
   audio_output: true
@@ -31,7 +31,7 @@ base_config:
   module_type: 2
   robot_name: Orange
   sbc_version: 0.93
-  use_lidar: false
+  use_lidar: true
 cmd_config:
   cmd_arm_ctrl_ui: 144
   cmd_gimbal_base_ctrl: 141

@@ -157,7 +157,13 @@ grid = np.full((GRID, GRID), 128, np.uint8)
 traj = []
 
 
+OCC_INC = 30   # +probability for a hit (wall)
+FREE_DEC = 8   # -probability for free space along the ray
+
+
 def update_map(ranges, angles, rx, ry, rth):
+    rx0 = int(round(rx / RES)) + cx
+    ry0 = int(round(ry / RES)) + cy
     for d, a in zip(ranges, angles):
         if d <= 0:
             continue
@@ -168,8 +174,55 @@ def update_map(ranges, angles, rx, ry, rth):
         wy = ry + math.sin(rth) * px + math.cos(rth) * py
         gx = int(round(wx / RES)) + cx
         gy = int(round(wy / RES)) + cy
-        if 0 <= gx < GRID and 0 <= gy < GRID:
-            grid[gy, gx] = 0
+        if not (0 <= gx < GRID and 0 <= gy < GRID):
+            continue
+        # free space along the ray (decrease occupancy, step 2 for speed)
+        nn = max(abs(gx - rx0), abs(gy - ry0))
+        if nn > 0:
+            for t in range(1, nn, 2):
+                fx = rx0 + int(round((gx - rx0) * t / nn))
+                fy = ry0 + int(round((gy - ry0) * t / nn))
+                if 0 <= fx < GRID and 0 <= fy < GRID:
+                    v = grid[fy, fx]
+                    grid[fy, fx] = v - FREE_DEC if v > FREE_DEC else 0
+        # occupied endpoint (increase occupancy)
+        v = grid[gy, gx]
+        grid[gy, gx] = v + OCC_INC if v < 255 - OCC_INC else 255
+
+
+def scan_match(ranges, angles, rx, ry, rth):
+    """Scan-to-map correlation: find a small (dx, dy, dth) that best aligns the
+    current scan to the accumulated occupancy map (odometry prior + refinement)."""
+    pts = []
+    for d, a in zip(ranges[::4], angles[::4]):
+        if d <= 0:
+            continue
+        ra = a * math.pi / 180.0
+        pts.append((d / 1000.0 * math.cos(ra), d / 1000.0 * math.sin(ra)))
+    if len(pts) < 20:
+        return 0.0, 0.0, 0.0
+    best_score = -1
+    best = (0.0, 0.0, 0.0)
+    for dth in (-1.0, -0.5, 0.0, 0.5, 1.0):
+        dth_r = math.radians(dth)
+        c = math.cos(rth + dth_r)
+        s = math.sin(rth + dth_r)
+        for dx in (-0.02, 0.0, 0.02):
+            for dy in (-0.02, 0.0, 0.02):
+                bx = rx + dx
+                by = ry + dy
+                score = 0
+                for px, py in pts:
+                    wx = bx + c * px - s * py
+                    wy = by + s * px + c * py
+                    gx = int(round(wx / RES)) + cx
+                    gy = int(round(wy / RES)) + cy
+                    if 0 <= gx < GRID and 0 <= gy < GRID and grid[gy, gx] > 128:
+                        score += 1
+                if score > best_score:
+                    best_score = score
+                    best = (dx, dy, dth_r)
+    return best
 
 
 def write_shm():
@@ -198,6 +251,13 @@ try:
             continue
         ranges, angles = scan
         with pose_lock:
+            rx, ry, rth = pose_x, pose_y, pose_th
+        dx, dy, dth = scan_match(ranges, angles, rx, ry, rth)
+        if dx != 0.0 or dy != 0.0 or dth != 0.0:
+            with pose_lock:
+                pose_x += dx
+                pose_y += dy
+                pose_th += dth
             rx, ry, rth = pose_x, pose_y, pose_th
         update_map(ranges, angles, rx, ry, rth)
         traj.append([rx, ry])

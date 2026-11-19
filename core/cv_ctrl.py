@@ -529,7 +529,7 @@ class OpencvFuncs():
                         self.cv_event.set()
                         self.opencv_threading(input_frame)
 
-                # Накладываем overlay (для всех режимов) — через 640x480 для скорости (x6)
+                # Накладываем overlay (для всех режимов) — на полном разрешении (чёткие надписи)
                 try:
                     if self.overlay is not None:
                         oh, ow = input_frame.shape[:2]
@@ -537,14 +537,9 @@ class OpencvFuncs():
                             ov = cv2.resize(self.overlay, (ow, oh), interpolation=cv2.INTER_NEAREST)
                         else:
                             ov = self.overlay
-                        # Ресайз до 640x480: fancy indexing в 6 раз быстрее (как у Waveshare)
-                        ov_small = cv2.resize(ov, (640, 480))
-                        frame_small = cv2.resize(input_frame, (640, 480))
-                        mask = ov_small.astype(bool)
-                        frame_small[mask] = ov_small[mask]
-                        cv2.addWeighted(ov_small, 1, frame_small, 1, 0, frame_small)
-                        # Обратно до исходного разрешения
-                        input_frame[:] = cv2.resize(frame_small, (ow, oh))
+                        mask = ov.astype(bool)
+                        input_frame[mask] = ov[mask]
+                        cv2.addWeighted(ov, 1, input_frame, 1, 0, input_frame)
                 except Exception as e:
                     print(f"[cv_ctrl._process_frame_opencv] overlay error: {e}")
             elif self.show_info_flag:

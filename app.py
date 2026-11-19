@@ -695,6 +695,16 @@ def base_data_loop():
                 data = base.feedback_data()
                 if data is not None and data.get('T') == 1051:
                     socketio.emit('arm_state_update', data, namespace='/arm_state_update')
+        else:
+            # SLAM mode: telemetry is read by the daemon and published to SHM
+            try:
+                with open('/dev/shm/ugv_esp_telemetry.json') as _f:
+                    shm_data = json.load(_f)
+                shm_data['T'] = 1001
+                base.base_data = shm_data
+                cvf.update_base_data(shm_data)
+            except Exception:
+                pass
 
         # get sensor data
         if base.extra_sensor:

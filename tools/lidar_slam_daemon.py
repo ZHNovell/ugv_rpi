@@ -242,6 +242,40 @@ def scan_match(ranges, angles, rx, ry, rth):
     return best
 
 
+def global_relocalize(ranges, angles, rx, ry, rth):
+    """Periodic global scan-to-map search (coarse) to correct accumulated drift.
+    Returns the best pose found near the current pose (+-1.5 m, full 360 deg)."""
+    pts = []
+    for d, a in zip(ranges[::8], angles[::8]):
+        if d <= 0:
+            continue
+        ra = a * math.pi / 180.0
+        pts.append((d / 1000.0 * math.cos(ra), d / 1000.0 * math.sin(ra)))
+    if len(pts) < 15:
+        return rx, ry, rth
+    P = np.array(pts, np.float32)
+    best_score = -1
+    best = (rx, ry, rth)
+    for dth in range(0, 360, 10):
+        dth_r = math.radians(dth)
+        c = math.cos(rth + dth_r)
+        s = math.sin(rth + dth_r)
+        for dx in np.arange(-1.5, 1.51, 0.15):
+            for dy in np.arange(-1.5, 1.51, 0.15):
+                wx = (rx + dx) + c * P[:, 0] - s * P[:, 1]
+                wy = (ry + dy) + s * P[:, 0] + c * P[:, 1]
+                gx = np.round(wx / RES).astype(np.int32) + cx
+                gy = np.round(wy / RES).astype(np.int32) + cy
+                valid = (gx >= 0) & (gx < GRID) & (gy >= 0) & (gy < GRID)
+                gxv = gx[valid]
+                gyv = gy[valid]
+                score = int(np.count_nonzero(grid[gyv, gxv] > 128))
+                if score > best_score:
+                    best_score = score
+                    best = (rx + dx, ry + dy, rth + dth_r)
+    return best
+
+
 def write_shm():
     tmp = SHM_MAP + '.tmp'
     with open(tmp, 'wb') as f:
@@ -261,6 +295,7 @@ ser = serial.Serial(LIDAR, LIDAR_BAUD, timeout=1)
 last_write = 0.0
 print("SLAM daemon v4 (wheel odometry) running. Ctrl+C to stop.", flush=True)
 
+scan_n = 0
 try:
     while True:
         scan = read_scan()
@@ -276,6 +311,17 @@ try:
                 pose_y += dy
                 pose_th += dth
             rx, ry, rth = pose_x, pose_y, pose_th
+        scan_n += 1
+        # periodic global re-localization (loop closure) -- DISABLED: too prone
+        # to false positives (repeated room structure); needs keyframe matching
+        # if scan_n % 50 == 0:
+        #     nrx, nry, nrth = global_relocalize(ranges, angles, rx, ry, rth)
+        #     off = math.hypot(nrx - rx, nry - ry)
+        #     if 0.3 < off < 2.0 or (0.1 < abs(nrth - rth) < 1.0):
+        #         with pose_lock:
+        #             pose_x, pose_y, pose_th = nrx, nry, nrth
+        #         rx, ry, rth = nrx, nry, nrth
+        #         print("loop closure: corrected drift %.2f m %.1f deg" % (off, math.degrees(nrth - rth)), flush=True)
         update_map(ranges, angles, rx, ry, rth)
         traj.append([rx, ry])
         if time.time() - last_write > WRITE_INTERVAL:

@@ -1284,8 +1284,8 @@ def usb_camera_detection(self):
 **Архитектура (GStreamer `tee`):**
 
 ```
-v4l2src -> image/jpeg (MJPG, 1920x1080@30) -> jpegdec -> tee
-├─ queue (leaky) -> videoconvert -> BGR -> appsink (живой поток)
+v4l2src -> image/jpeg (MJPG, 1920x1080@60) -> omxmjpegvideodec -> videorate (30 FPS) -> videoconvert -> BGR -> tee
+├─ queue (leaky) -> appsink (живой поток)
 └─ queue -> videoconvert -> videoscale -> 1280x720 I420
    -> avenc_mjpeg -> matroskamux -> filesink (запись)
 ```
@@ -1300,6 +1300,7 @@ v4l2src -> image/jpeg (MJPG, 1920x1080@30) -> jpegdec -> tee
    - Отправить EOS через sink pad `rec_queue`.
    - `set_state(NULL)` -> `pipeline.remove()`.
 5. **`v4l2src do-timestamp=true`** — PTS из системных часов.
+6. **Аппаратный MJPEG-декод** — `omxmjpegvideodec` (VPU CedarC) + `videorate` 30 FPS вместо софтверного `jpegdec`. CPU: **267% → 133%** (~50%).
 
 **Параметры:**
 - Разрешение записи: **1280x720**.
@@ -1468,6 +1469,7 @@ if (self.calib_w != frame_w) or (self.calib_h != frame_h):
 - **2026-10-25:** Адаптивный подъём PT, индикация батареи (4 цвета), кнопка STOP на Orange Pi и ESP32.
 - **2026-11-16:** Перенос seg/depth на Radxa AICore AX-M1 (AXCL-серверы).
 - **2026-11-18:** Перенос pose на AX-M1, фикс камеры 1080p@60, реструктуризация проекта (core/modules/scripts/tools/).
+- **2026-11-19:** Аппаратный MJPEG-декод (`omxmjpegvideodec`) + лимит 30 FPS (CPU 267% → 133%).
 
 
 ## 🔗 Ссылки

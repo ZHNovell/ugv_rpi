@@ -494,6 +494,50 @@ def offer_route():
 def video_feed():
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@app.route('/map')
+def slam_map():
+    import cv2
+    import numpy as np
+    try:
+        with open('/dev/shm/ugv_slam_map.raw', 'rb') as f:
+            raw = f.read()
+        with open('/dev/shm/ugv_slam_pose.json') as f:
+            pose = json.load(f)
+        g = pose.get('grid', 1000)
+        grid = np.frombuffer(raw, dtype=np.uint8).reshape((g, g))
+    except Exception:
+        img = 128 * np.ones((480, 640, 3), np.uint8)
+        cv2.putText(img, "SLAM map not ready", (110, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        ret, buf = cv2.imencode('.png', img)
+        return Response(buf.tobytes(), mimetype='image/png')
+
+    RES = pose.get('res', 0.02)
+    cx = g // 2
+    img = cv2.cvtColor(grid, cv2.COLOR_GRAY2BGR)
+    traj = pose.get('traj', [])
+    if len(traj) > 1:
+        pts = [(int(round(p[0] / RES)) + cx, int(round(p[1] / RES)) + cx) for p in traj]
+        for i in range(1, len(pts)):
+            cv2.line(img, pts[i - 1], pts[i], (0, 200, 0), 2)
+    rx = int(round(pose['x'] / RES)) + cx
+    ry = int(round(pose['y'] / RES)) + cx
+    cv2.circle(img, (rx, ry), 9, (0, 0, 255), -1)
+    th = pose.get('theta', 0.0)
+    hx = int(rx + 45 * np.cos(th))
+    hy = int(ry + 45 * np.sin(th))
+    cv2.line(img, (rx, ry), (hx, hy), (0, 0, 255), 3)
+    cv2.putText(img, "FWD", (cx + 12, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+    cv2.putText(img, "REAR", (cx + 12, g - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
+    cv2.putText(img, "LEFT", (12, cx + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 200, 0), 2)
+    cv2.putText(img, "RIGHT", (g - 100, cx + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 200, 0), 2)
+    ret, buf = cv2.imencode('.png', img)
+    return Response(buf.tobytes(), mimetype='image/png')
+
+
+@app.route('/map_view')
+def map_view():
+    return render_template('map.html')
+
 @app.route('/send_command', methods=['POST'])
 def handle_command():
     command = request.form['command']

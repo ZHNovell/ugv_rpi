@@ -523,8 +523,8 @@ def slam_map():
     ry = int(round(pose['y'] / RES)) + cx
     cv2.circle(img, (rx, ry), 9, (0, 0, 255), -1)
     th = pose.get('theta', 0.0)
-    hx = int(rx + 45 * np.cos(th))
-    hy = int(ry + 45 * np.sin(th))
+    hx = int(rx + 45 * np.sin(th))
+    hy = int(ry - 45 * np.cos(th))
     cv2.line(img, (rx, ry), (hx, hy), (0, 0, 255), 3)
     cv2.putText(img, "FWD", (cx + 12, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
     cv2.putText(img, "REAR", (cx + 12, g - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
@@ -685,14 +685,16 @@ def update_data_loop():
 def base_data_loop():
     sensor_interval = 1
     sensor_read_time = time.time()
+    slam_mode = f['args_config'].get('slam_mode', False)
     while True:
-        cvf.update_base_data(base.feedback_data())
-        # arm state (только для module_type != 2, т.е. не PT)
-        if f['base_config']['module_type'] != 2:
-            base.base_json_ctrl({"T":105})
-            data = base.feedback_data()
-            if data is not None and data.get('T') == 1051:
-                socketio.emit('arm_state_update', data, namespace='/arm_state_update')
+        if not slam_mode:
+            cvf.update_base_data(base.feedback_data())
+            # arm state (только для module_type != 2, т.е. не PT)
+            if f['base_config']['module_type'] != 2:
+                base.base_json_ctrl({"T":105})
+                data = base.feedback_data()
+                if data is not None and data.get('T') == 1051:
+                    socketio.emit('arm_state_update', data, namespace='/arm_state_update')
 
         # get sensor data
         if base.extra_sensor:

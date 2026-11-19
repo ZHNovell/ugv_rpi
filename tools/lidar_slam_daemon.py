@@ -4,20 +4,117 @@ import math
 import time
 import json
 import os
+import threading
 
-SER = '/dev/ttyACM1'
-BAUD = 230400
+LIDAR = '/dev/ttyACM1'
+ESP = '/dev/ttyACM0'
+LIDAR_BAUD = 230400
+ESP_BAUD = 115200
 APF = 12
 MAX_DIST = 12000
 READ_TIME = 0.11
 
 SHM_MAP = '/dev/shm/ugv_slam_map.raw'
 SHM_POSE = '/dev/shm/ugv_slam_pose.json'
+SHM_ESP = '/dev/shm/ugv_esp_telemetry.json'
 WRITE_INTERVAL = 0.5
 
 GRID = 1000
 RES = 0.02
 cx = cy = GRID // 2
+NUM_POINTS = 432
+WHEELBASE = 0.175  # meters (from Waveshare base_node.cpp)
+ENC_MM_PER_TICK = 31.75  # calibrated: 1 m = ~31.5 ticks (measured 31/32 ticks over 1 m)
+GYRO_DEG_PER_LSB = 0.06016  # calibrated: 360 deg CW -> 45.68 deg (k=7.88), ~16.6 LSB/(deg/s) = +-2000
+gyro_bias = 0.0
+comp_offset = None
+last_gyro_ts = 0.0
+
+
+def esp_reader():
+    global prev_odl, prev_odr, gyro_bias, last_gyro_ts, comp_offset
+    try:
+        s = serial.Serial(ESP, ESP_BAUD, timeout=0.5)
+    except Exception as e:
+        print("ESP32 open failed:", e)
+        return
+    # measure gyro bias + compass offset over 1.5s (robot must be stationary at startup)
+    biases = []
+    comp_heads = []
+    t0 = time.time()
+    while time.time() - t0 < 1.5:
+        d = s.readline()
+        if not d:
+            continue
+        try:
+            j = json.loads(d)
+            if j.get('T') == 1001:
+                biases.append(j.get('gz', 0))
+                mx = j.get('mx', 0)
+                my = j.get('my', 0)
+                if mx != 0 or my != 0:
+                    comp_heads.append(math.atan2(my, mx))
+        except Exception:
+            pass
+    gyro_bias = sum(biases) / len(biases) if biases else 0.0
+    comp_offset = sum(comp_heads) / len(comp_heads) if comp_heads else 0.0
+    last_gyro_ts = time.time()
+    print("gyro_bias = %.2f LSB  comp_offset = %.2f rad" % (gyro_bias, comp_offset), flush=True)
+    while True:
+        try:
+            d = s.readline()
+        except Exception:
+            time.sleep(0.2)
+            continue
+        if not d:
+            continue
+        try:
+            j = json.loads(d)
+            if j.get('T') != 1001:
+                continue
+            esp['odl'] = j.get('odl', 0)
+            esp['odr'] = j.get('odr', 0)
+            esp['gz'] = j.get('gz', 0)
+            esp['mx'] = j.get('mx', 0)
+            esp['my'] = j.get('my', 0)
+            esp['v'] = j.get('v', 0)
+            esp['ts'] = time.time()
+            now = time.time()
+            dt = now - last_gyro_ts
+            last_gyro_ts = now
+            # rotation from gyro (immune to wheel slip), translation from encoders
+            if prev_odl is not None:
+                dl = (esp['odl'] - prev_odl) * ENC_MM_PER_TICK / 1000.0  # meters
+                dr = (esp['odr'] - prev_odr) * ENC_MM_PER_TICK / 1000.0
+                dxy = (dr + dl) / 2.0
+                with pose_lock:
+                    global pose_x, pose_y, pose_th
+                    pose_x += dxy * math.sin(pose_th)
+                    pose_y -= dxy * math.cos(pose_th)
+                    pose_th -= (esp['gz'] - gyro_bias) * GYRO_DEG_PER_LSB * math.pi / 180.0 * dt
+                    # compass fusion: slowly pull heading toward absolute magnetic heading
+                    if comp_offset is not None:
+                        ch = math.atan2(esp['my'], esp['mx']) - comp_offset
+                        diff = ch - pose_th
+                        diff = (diff + math.pi) % (2 * math.pi) - math.pi
+                        pose_th += 0.02 * diff
+            prev_odl = esp['odl']
+            prev_odr = esp['odr']
+            # publish telemetry
+            tmp = SHM_ESP + '.tmp'
+            with open(tmp, 'w') as f:
+                json.dump(esp, f)
+            os.rename(tmp, SHM_ESP)
+        except Exception:
+            pass
+
+esp = {'odl': 0, 'odr': 0, 'gz': 0.0, 'mx': 0, 'my': 0, 'v': 0, 'ts': 0.0}
+pose_x = 0.0
+pose_y = 0.0
+pose_th = 0.0
+pose_lock = threading.Lock()
+prev_odl = None
+prev_odr = None
 
 
 def read_scan():
@@ -34,94 +131,44 @@ def read_scan():
             off = 6 + i * 3
             d = b[off + 1] << 8 | b[off]
             a = (start + i * 0.83333 + 180) % 360
-            if 0 < d <= MAX_DIST:
+            if 150 < d <= MAX_DIST:
                 angles.append(a)
                 dists.append(d)
     if len(angles) < 30:
         return None
     order = np.argsort(angles)
-    angles = np.array(angles)[order][::4]
-    dists = np.array(dists)[order][::4]
-    r = np.radians(angles)
-    return np.column_stack([np.cos(r) * dists / 1000.0, np.sin(r) * dists / 1000.0])
-
-
-def align_to_map(pts, x, y, th, grid, max_iter=25):
-    """Scan-to-map ICP: register current scan against accumulated occupancy grid.
-    Returns corrected (x, y, th)."""
-    WIN = 6  # half-window in cells (6 * 2cm = 12 cm search radius)
-    for _ in range(max_iter):
-        R = np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
-        pts_w = (R @ pts.T).T + np.array([x, y])
-        src = []
-        dst = []
-        for px, py in pts_w:
-            gx = int(round(px / RES)) + cx
-            gy = int(round(py / RES)) + cy
-            if not (0 <= gx < GRID and 0 <= gy < GRID):
-                continue
-            best = None
-            for dy in range(-WIN, WIN + 1):
-                ny = gy + dy
-                if ny < 0 or ny >= GRID:
-                    continue
-                row = grid[ny]
-                for dx in range(-WIN, WIN + 1):
-                    nx = gx + dx
-                    if 0 <= nx < GRID and row[nx] == 0:
-                        d2 = dx * dx + dy * dy
-                        if best is None or d2 < best[0]:
-                            best = (d2, (nx - cx) * RES, (ny - cy) * RES)
-            if best is not None:
-                src.append((px, py))
-                dst.append((best[1], best[2]))
-        if len(src) < 20:
-            return x, y, th
-        src = np.array(src)
-        dst = np.array(dst)
-        cs = src.mean(0)
-        cd = dst.mean(0)
-        H = (src - cs).T @ (dst - cd)
-        U, S, Vt = np.linalg.svd(H)
-        Rc = Vt.T @ U.T
-        if np.linalg.det(Rc) < 0:
-            Vt[-1, :] *= -1
-            Rc = Vt.T @ U.T
-        tc = cd - Rc @ cs
-        dth = math.atan2(Rc[1, 0], Rc[0, 0])
-        xy = Rc @ np.array([x, y]) + tc
-        x, y = xy[0], xy[1]
-        th += dth
-        if np.linalg.norm(tc) < 1e-3 and abs(dth) < 1e-4:
-            break
-    return x, y, th
+    a = np.array(angles, np.float32)[order]
+    d = np.array(dists, np.float32)[order]
+    grid_a = np.linspace(0.0, 360.0, NUM_POINTS, endpoint=False)
+    idx = np.searchsorted(a, grid_a)
+    idx = np.clip(idx, 1, len(a) - 1)
+    left_a = a[idx - 1]
+    right_a = a[idx]
+    left_d = d[idx - 1]
+    right_d = d[idx]
+    near = np.where(np.abs(grid_a - left_a) <= np.abs(right_a - grid_a), left_d, right_d)
+    gap = np.minimum(np.abs(grid_a - left_a), np.abs(right_a - grid_a))
+    r = np.where(gap < 1.5, near, 0.0).astype(np.float32)
+    return r, grid_a
 
 
 grid = np.full((GRID, GRID), 128, np.uint8)
-pose_x = 0.0
-pose_y = 0.0
-pose_th = 0.0
 traj = []
-n = 0
 
 
-def update_map(pts_w, rx, ry):
-    gx0 = int(round(rx / RES)) + cx
-    gy0 = int(round(ry / RES)) + cy
-    for px, py in pts_w:
-        gx = int(round(px / RES)) + cx
-        gy = int(round(py / RES)) + cy
-        if not (0 <= gx < GRID and 0 <= gy < GRID):
+def update_map(ranges, angles, rx, ry, rth):
+    for d, a in zip(ranges, angles):
+        if d <= 0:
             continue
-        grid[gy, gx] = 0
-        nn = max(abs(gx - gx0), abs(gy - gy0))
-        if nn == 0:
-            continue
-        for t in range(1, nn):
-            fx = gx0 + int(round((gx - gx0) * t / nn))
-            fy = gy0 + int(round((gy - gy0) * t / nn))
-            if 0 <= fx < GRID and 0 <= fy < GRID:
-                grid[fy, fx] = 255
+        ra = a * math.pi / 180.0
+        px = d / 1000.0 * math.cos(ra)
+        py = d / 1000.0 * math.sin(ra)
+        wx = rx + math.cos(rth) * px - math.sin(rth) * py
+        wy = ry + math.sin(rth) * px + math.cos(rth) * py
+        gx = int(round(wx / RES)) + cx
+        gy = int(round(wy / RES)) + cy
+        if 0 <= gx < GRID and 0 <= gy < GRID:
+            grid[gy, gx] = 0
 
 
 def write_shm():
@@ -130,40 +177,29 @@ def write_shm():
         f.write(grid.tobytes())
     os.rename(tmp, SHM_MAP)
     tmp = SHM_POSE + '.tmp'
-    data = {'x': pose_x, 'y': pose_y, 'theta': pose_th, 'ts': time.time(),
-            'scans': n, 'grid': GRID, 'res': RES, 'traj': traj[-2000:]}
+    with pose_lock:
+        data = {'x': pose_x, 'y': pose_y, 'theta': pose_th, 'ts': time.time(),
+                'grid': GRID, 'res': RES, 'traj': traj[-2000:]}
     with open(tmp, 'w') as f:
         json.dump(data, f)
     os.rename(tmp, SHM_POSE)
 
 
-ser = serial.Serial(SER, BAUD, timeout=1)
-prev = None
+threading.Thread(target=esp_reader, daemon=True).start()
+ser = serial.Serial(LIDAR, LIDAR_BAUD, timeout=1)
 last_write = 0.0
-print("SLAM daemon (scan-to-map) running. Ctrl+C to stop.", flush=True)
+print("SLAM daemon v4 (wheel odometry) running. Ctrl+C to stop.", flush=True)
 
 try:
     while True:
-        pts = read_scan()
-        if pts is None:
+        scan = read_scan()
+        if scan is None:
             continue
-        if prev is None:
-            update_map(pts, 0.0, 0.0)
-            prev = pts
-            continue
-        # scan-to-map registration
-        nx, ny, nth = align_to_map(pts, pose_x, pose_y, pose_th, grid)
-        # reject big jumps (registration likely failed)
-        if abs(nx - pose_x) > 0.5 or abs(ny - pose_y) > 0.5 or abs(nth - pose_th) > 0.6:
-            nx, ny, nth = pose_x, pose_y, pose_th
-        pose_x, pose_y, pose_th = nx, ny, nth
-        Rw = np.array([[math.cos(pose_th), -math.sin(pose_th)],
-                       [math.sin(pose_th), math.cos(pose_th)]])
-        pts_w = (Rw @ pts.T).T + np.array([pose_x, pose_y])
-        update_map(pts_w, pose_x, pose_y)
-        prev = pts
-        traj.append([pose_x, pose_y])
-        n += 1
+        ranges, angles = scan
+        with pose_lock:
+            rx, ry, rth = pose_x, pose_y, pose_th
+        update_map(ranges, angles, rx, ry, rth)
+        traj.append([rx, ry])
         if time.time() - last_write > WRITE_INTERVAL:
             write_shm()
             last_write = time.time()
@@ -172,4 +208,4 @@ except KeyboardInterrupt:
 finally:
     write_shm()
     ser.close()
-    print("saved. scans=%d pose x=%.2f y=%.2f th=%.1f" % (n, pose_x, pose_y, math.degrees(pose_th)))
+    print("saved. pose x=%.2f y=%.2f th=%.1f" % (pose_x, pose_y, math.degrees(pose_th)))

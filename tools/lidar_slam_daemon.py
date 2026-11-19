@@ -121,20 +121,27 @@ prev_odr = None
 def read_scan():
     angles, dists = [], []
     t0 = time.time()
+    buf = b''
     while time.time() - t0 < READ_TIME:
-        hdr = ser.read(1)
-        if hdr != b'\x54':
-            continue
-        data = hdr + ser.read(46)
-        b = [x for x in data]
-        start = (b[5] << 8 | b[4]) * 0.01
-        for i in range(APF):
-            off = 6 + i * 3
-            d = b[off + 1] << 8 | b[off]
-            a = (start + i * 0.83333 + 180) % 360
-            if 150 < d <= MAX_DIST:
-                angles.append(a)
-                dists.append(d)
+        n = ser.in_waiting
+        if n > 0:
+            buf += ser.read(n)
+        else:
+            time.sleep(0.003)
+        while len(buf) >= 47:
+            if buf[0] != 0x54:
+                buf = buf[1:]
+                continue
+            pkt = buf[:47]
+            buf = buf[47:]
+            start = (pkt[5] << 8 | pkt[4]) * 0.01
+            for i in range(APF):
+                off = 6 + i * 3
+                d = pkt[off + 1] << 8 | pkt[off]
+                a = (start + i * 0.83333 + 180) % 360
+                if 150 < d <= MAX_DIST:
+                    angles.append(a)
+                    dists.append(d)
     if len(angles) < 30:
         return None
     order = np.argsort(angles)
@@ -164,35 +171,40 @@ FREE_DEC = 8   # -probability for free space along the ray
 def update_map(ranges, angles, rx, ry, rth):
     rx0 = int(round(rx / RES)) + cx
     ry0 = int(round(ry / RES)) + cy
-    for d, a in zip(ranges, angles):
-        if d <= 0:
+    d = np.asarray(ranges, np.float32)
+    a = np.asarray(angles, np.float32)
+    valid = d > 0
+    ra = a[valid] * (math.pi / 180.0)
+    dd = d[valid] / 1000.0
+    px = dd * np.cos(ra)
+    py = dd * np.sin(ra)
+    wx = rx + math.cos(rth) * px - math.sin(rth) * py
+    wy = ry + math.sin(rth) * px + math.cos(rth) * py
+    gx = np.round(wx / RES).astype(np.int32) + cx
+    gy = np.round(wy / RES).astype(np.int32) + cy
+    inb = (gx >= 0) & (gx < GRID) & (gy >= 0) & (gy < GRID)
+    gxv = gx[inb]
+    gyv = gy[inb]
+    # occupied endpoints (vectorized)
+    grid[gyv, gxv] = np.clip(grid[gyv, gxv].astype(np.int16) + OCC_INC, 0, 255).astype(np.uint8)
+    # free space along rays (coarse, small numpy per point)
+    for ex, ey in zip(gxv.tolist(), gyv.tolist()):
+        nn = max(abs(ex - rx0), abs(ey - ry0))
+        if nn <= 1:
             continue
-        ra = a * math.pi / 180.0
-        px = d / 1000.0 * math.cos(ra)
-        py = d / 1000.0 * math.sin(ra)
-        wx = rx + math.cos(rth) * px - math.sin(rth) * py
-        wy = ry + math.sin(rth) * px + math.cos(rth) * py
-        gx = int(round(wx / RES)) + cx
-        gy = int(round(wy / RES)) + cy
-        if not (0 <= gx < GRID and 0 <= gy < GRID):
-            continue
-        # free space along the ray (decrease occupancy, step 2 for speed)
-        nn = max(abs(gx - rx0), abs(gy - ry0))
-        if nn > 0:
-            for t in range(1, nn, 2):
-                fx = rx0 + int(round((gx - rx0) * t / nn))
-                fy = ry0 + int(round((gy - ry0) * t / nn))
-                if 0 <= fx < GRID and 0 <= fy < GRID:
-                    v = grid[fy, fx]
-                    grid[fy, fx] = v - FREE_DEC if v > FREE_DEC else 0
-        # occupied endpoint (increase occupancy)
-        v = grid[gy, gx]
-        grid[gy, gx] = v + OCC_INC if v < 255 - OCC_INC else 255
+        t = np.arange(2, nn, 3, dtype=np.float32)
+        fx = rx0 + np.round((ex - rx0) * t / nn).astype(np.int32)
+        fy = ry0 + np.round((ey - ry0) * t / nn).astype(np.int32)
+        ok = (fx >= 0) & (fx < GRID) & (fy >= 0) & (fy < GRID)
+        fxv = fx[ok]
+        fyv = fy[ok]
+        if fxv.size:
+            grid[fyv, fxv] = np.clip(grid[fyv, fxv].astype(np.int16) - FREE_DEC, 0, 255).astype(np.uint8)
 
 
 def scan_match(ranges, angles, rx, ry, rth):
-    """Scan-to-map correlation: find a small (dx, dy, dth) that best aligns the
-    current scan to the accumulated occupancy map (odometry prior + refinement)."""
+    """Scan-to-map correlation (numpy-vectorized): find a small (dx, dy, dth) that
+    best aligns the current scan to the accumulated occupancy map."""
     pts = []
     for d, a in zip(ranges[::4], angles[::4]):
         if d <= 0:
@@ -201,7 +213,9 @@ def scan_match(ranges, angles, rx, ry, rth):
         pts.append((d / 1000.0 * math.cos(ra), d / 1000.0 * math.sin(ra)))
     if len(pts) < 20:
         return 0.0, 0.0, 0.0
+    P = np.array(pts, np.float32)
     best_score = -1
+    base_score = -1
     best = (0.0, 0.0, 0.0)
     for dth in (-1.0, -0.5, 0.0, 0.5, 1.0):
         dth_r = math.radians(dth)
@@ -209,19 +223,22 @@ def scan_match(ranges, angles, rx, ry, rth):
         s = math.sin(rth + dth_r)
         for dx in (-0.02, 0.0, 0.02):
             for dy in (-0.02, 0.0, 0.02):
-                bx = rx + dx
-                by = ry + dy
-                score = 0
-                for px, py in pts:
-                    wx = bx + c * px - s * py
-                    wy = by + s * px + c * py
-                    gx = int(round(wx / RES)) + cx
-                    gy = int(round(wy / RES)) + cy
-                    if 0 <= gx < GRID and 0 <= gy < GRID and grid[gy, gx] > 128:
-                        score += 1
+                wx = (rx + dx) + c * P[:, 0] - s * P[:, 1]
+                wy = (ry + dy) + s * P[:, 0] + c * P[:, 1]
+                gx = np.round(wx / RES).astype(np.int32) + cx
+                gy = np.round(wy / RES).astype(np.int32) + cy
+                valid = (gx >= 0) & (gx < GRID) & (gy >= 0) & (gy < GRID)
+                gxv = gx[valid]
+                gyv = gy[valid]
+                score = int(np.count_nonzero(grid[gyv, gxv] > 128))
+                if dth == 0.0 and dx == 0.0 and dy == 0.0:
+                    base_score = score
                 if score > best_score:
                     best_score = score
                     best = (dx, dy, dth_r)
+    # reject ambiguous corrections (e.g. long corridor with parallel walls)
+    if best_score - base_score < 3:
+        return (0.0, 0.0, 0.0)
     return best
 
 

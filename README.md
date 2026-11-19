@@ -1283,8 +1283,8 @@ def usb_camera_detection(self):
 **Architecture (GStreamer `tee`):**
 
 ```
-v4l2src -> image/jpeg (MJPG, 1920x1080@30) -> jpegdec -> tee
-├─ queue (leaky) -> videoconvert -> BGR -> appsink (live stream)
+v4l2src -> image/jpeg (MJPG, 1920x1080@60) -> omxmjpegvideodec -> videorate (30 FPS) -> videoconvert -> BGR -> tee
+├─ queue (leaky) -> appsink (live stream)
 └─ queue -> videoconvert -> videoscale -> 1280x720 I420
    -> avenc_mjpeg -> matroskamux -> filesink (recording)
 ```
@@ -1299,6 +1299,7 @@ v4l2src -> image/jpeg (MJPG, 1920x1080@30) -> jpegdec -> tee
    - Send EOS through the sink pad `rec_queue`.
    - `set_state(NULL)` -> `pipeline.remove()`.
 5. **`v4l2src do-timestamp=true`** — PTS from the system clock.
+6. **Hardware MJPEG decode** — `omxmjpegvideodec` (VPU CedarC) + `videorate` 30 FPS instead of software `jpegdec`. CPU: **267% → 133%** (~50%).
 
 **Parameters:**
 - Recording resolution: **1280x720**.
@@ -1466,6 +1467,7 @@ if (self.calib_w != frame_w) or (self.calib_h != frame_h):
 - **2026-10-25:** Adaptive PT lift, battery indication (4 colors), STOP button on the Orange Pi and ESP32.
 - **2026-11-16:** Moving seg/depth to the Radxa AICore AX-M1 (AXCL servers).
 - **2026-11-18:** Moving pose to the AX-M1, 1080p@60 camera fix, project restructuring (core/modules/scripts/tools/).
+- **2026-11-19:** Hardware MJPEG decode (`omxmjpegvideodec`) + 30 FPS cap (CPU 267% → 133%).
 
 
 ## 🔗 Links

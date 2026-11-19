@@ -1717,7 +1717,7 @@ class OpencvFuncs():
 
         # Лидарная защита: стоп, если препятствие < порога
         lidar_stop_mm = f['args_config'].get('autodrive_lidar_stop_mm', 150)
-        lidar_ignore_back_deg = f['args_config'].get('autodrive_lidar_ignore_back_deg', 30)
+        lidar_ignore_back_deg = f['args_config'].get('autodrive_lidar_ignore_back_deg', 50)
         min_dist = None
         if self.base_ctrl.use_lidar and self.base_ctrl.rl.lidar_distances_show:
             import math as _math

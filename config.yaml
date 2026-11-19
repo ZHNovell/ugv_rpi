@@ -17,7 +17,7 @@ args_config:
   autodrive_light_io4: 255
   autodrive_lidar_scale: 0.2
   autodrive_debug: true
-  autodrive_lidar_ignore_back_deg: 90
+  autodrive_lidar_ignore_back_deg: 50
 audio_config:
   audio_output: true
   default_volume: 1.0

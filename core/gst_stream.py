@@ -107,9 +107,10 @@ class GstStream:
         pipeline_str = (
             f"v4l2src device={self.device} io-mode=dmabuf ! "
             f"image/jpeg,width={self.width},height={self.height} ! "
-            f"omxmjpegvideodec ! videorate ! video/x-raw,framerate=30/1 ! videoconvert ! video/x-raw,format=BGR ! tee name=t "
+            f"jpegdec ! tee name=t "
             # Ветка 1: appsink для Python (превью/детекция)
             f"t. ! queue max-size-buffers=2 leaky=downstream ! "
+            f"videoconvert ! video/x-raw,format=BGR ! "
             f"appsink name=appsink max-buffers=1 drop=true emit-signals=true sync=false "
                     )
         print("[GstStream] Building pipeline (with tee)")

@@ -24,7 +24,8 @@ WRITE_INTERVAL = 0.5
 
 GRID = 1000
 RES = 0.02
-cx = cy = GRID // 2
+cx = GRID // 2
+cy = int(GRID * 0.75)  # start point in the bottom quarter (forward = up)
 NUM_POINTS = 432
 OCC_INC = 30
 FREE_DEC = 8
@@ -33,14 +34,19 @@ HECTOR_BIN = '/root/hector_standalone/build/hector_standalone'
 
 esp = {'odl': 0, 'odr': 0, 'gz': 0.0, 'mx': 0, 'my': 0, 'v': 0, 'ts': 0.0}
 GYRO_DEG_PER_LSB = 0.06016  # calibrated +-2000 dps
+ENC_MM_PER_TICK = 31.75     # calibrated wheel encoders
 gyro_bias = 0.0
 last_gyro_ts = 0.0
-theta_gyro = 0.0
+odom_x = 0.0
+odom_y = 0.0
+odom_th = 0.0
+prev_odl = None
+prev_odr = None
 theta_lock = threading.Lock()
 
 
 def esp_reader():
-    global gyro_bias, last_gyro_ts, theta_gyro
+    global gyro_bias, last_gyro_ts, odom_x, odom_y, odom_th, prev_odl, prev_odr
     try:
         s = serial.Serial(ESP, ESP_BAUD, timeout=0.5)
     except Exception as e:
@@ -50,7 +56,11 @@ def esp_reader():
     biases = []
     t0 = time.time()
     while time.time() - t0 < 1.5:
-        d = s.readline()
+        try:
+            d = s.readline()
+        except Exception:
+            time.sleep(0.2)
+            continue
         if not d:
             continue
         try:
@@ -85,7 +95,15 @@ def esp_reader():
             dt = now - last_gyro_ts
             last_gyro_ts = now
             with theta_lock:
-                theta_gyro -= (esp['gz'] - gyro_bias) * GYRO_DEG_PER_LSB * math.pi / 180.0 * dt
+                if prev_odl is not None:
+                    dl = (esp['odl'] - prev_odl) * ENC_MM_PER_TICK / 1000.0
+                    dr = (esp['odr'] - prev_odr) * ENC_MM_PER_TICK / 1000.0
+                    dxy = (dr + dl) / 2.0
+                    odom_x += dxy * math.sin(odom_th)
+                    odom_y -= dxy * math.cos(odom_th)
+                odom_th -= (esp['gz'] - gyro_bias) * GYRO_DEG_PER_LSB * math.pi / 180.0 * dt
+                prev_odl = esp['odl']
+                prev_odr = esp['odr']
             tmp = SHM_ESP + '.tmp'
             with open(tmp, 'w') as f:
                 json.dump(esp, f)
@@ -99,11 +117,15 @@ def read_scan():
     t0 = time.time()
     buf = b''
     while time.time() - t0 < READ_TIME:
-        n = ser.in_waiting
-        if n > 0:
-            buf += ser.read(n)
-        else:
-            time.sleep(0.003)
+        try:
+            n = ser.in_waiting
+            if n > 0:
+                buf += ser.read(n)
+            else:
+                time.sleep(0.003)
+        except Exception:
+            time.sleep(0.05)
+            continue
         while len(buf) >= 47:
             if buf[0] != 0x54:
                 buf = buf[1:]
@@ -196,8 +218,8 @@ try:
         if len(pts) < 30:
             continue
         with theta_lock:
-            yaw_prior = theta_gyro
-        proc.stdin.write("%.4f %s\n" % (yaw_prior, " ".join(pts)))
+            ox, oy, oth = odom_x, odom_y, odom_th
+        proc.stdin.write("%.3f %.3f %.4f %s\n" % (ox, oy, oth, " ".join(pts)))
         proc.stdin.flush()
         out = proc.stdout.readline()
         try:

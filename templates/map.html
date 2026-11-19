@@ -10,7 +10,7 @@ h2 { margin:4px 0; }
 </style>
 </head>
 <body>
-<h2>SLAM Map (обновляется каждую секунду)</h2>
+<h2>SLAM Map</h2>
 <img id="map" src="/map" alt="SLAM map">
 <script>
 setInterval(function(){ document.getElementById('map').src = '/map?t=' + Date.now(); }, 1000);

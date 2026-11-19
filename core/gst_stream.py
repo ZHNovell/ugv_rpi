@@ -107,10 +107,9 @@ class GstStream:
         pipeline_str = (
             f"v4l2src device={self.device} io-mode=dmabuf ! "
             f"image/jpeg,width={self.width},height={self.height} ! "
-            f"jpegdec ! tee name=t "
+            f"omxmjpegvideodec ! videorate ! video/x-raw,framerate=30/1 ! videoconvert ! video/x-raw,format=BGR ! tee name=t "
             # Ветка 1: appsink для Python (превью/детекция)
             f"t. ! queue max-size-buffers=2 leaky=downstream ! "
-            f"videoconvert ! video/x-raw,format=BGR ! "
             f"appsink name=appsink max-buffers=1 drop=true emit-signals=true sync=false "
                     )
         print("[GstStream] Building pipeline (with tee)")
@@ -127,7 +126,23 @@ class GstStream:
             if success:
                 try:
                     arr = np.frombuffer(map_info.data, dtype=np.uint8)
-                    arr = arr.reshape((self.height, self.width, 3)).copy()
+                    # Read actual dimensions from caps (HW decoders may pad height, e.g. 1088)
+                    w = self.width
+                    h = self.height
+                    caps = sample.get_caps()
+                    if caps and caps.get_size() > 0:
+                        s = caps.get_structure(0)
+                        ok, v = s.get_int('width')
+                        if ok:
+                            w = v
+                        ok, v = s.get_int('height')
+                        if ok:
+                            h = v
+                    arr = arr.reshape((h, w, 3))
+                    if h != self.height or w != self.width:
+                        arr = arr[:self.height, :self.width].copy()
+                    else:
+                        arr = arr.copy()
                     with self.frame_lock:
                         self.latest_frame = arr
                 finally:

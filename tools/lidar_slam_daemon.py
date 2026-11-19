@@ -192,6 +192,27 @@ def update_map(ranges, angles, rx, ry, rth):
             grid[fyv, fxv] = np.clip(grid[fyv, fxv].astype(np.int16) - FREE_DEC, 0, 255).astype(np.uint8)
 
 
+keyframes = []  # (x, y, th, pts_world)
+last_kf = (0.0, 0.0)
+scan_n = 0
+
+
+def loop_closure(pts_world, px, py):
+    best = None
+    best_score = 0.0
+    for kf in keyframes:
+        kx, ky, kth, kpts = kf
+        if math.hypot(kx - px, ky - py) > 2.0:
+            continue
+        d2 = ((pts_world[:, None, :] - kpts[None, :, :]) ** 2).sum(-1)
+        dmin = d2.min(axis=1)
+        score = float((dmin < 0.01).mean())  # fraction within 0.1 m
+        if score > best_score:
+            best_score = score
+            best = (kx, ky, kth)
+    return best, best_score
+
+
 threading.Thread(target=esp_reader, daemon=True).start()
 ser = serial.Serial(LIDAR, LIDAR_BAUD, timeout=1)
 grid = np.full((GRID, GRID), 128, np.uint8)
@@ -210,13 +231,18 @@ try:
             continue
         ranges, angles = scan
         pts = []
+        P_robot = []
         for dd, aa in zip(ranges, angles):
             if dd <= 0:
                 continue
             ra = aa * math.pi / 180.0
-            pts.append("%.3f %.3f" % (dd / 1000.0 * math.cos(ra), dd / 1000.0 * math.sin(ra)))
+            xr = dd / 1000.0 * math.cos(ra)
+            yr = dd / 1000.0 * math.sin(ra)
+            pts.append("%.3f %.3f" % (xr, yr))
+            P_robot.append((xr, yr))
         if len(pts) < 30:
             continue
+        P_robot = np.array(P_robot, np.float32).reshape(-1, 2)
         with theta_lock:
             ox, oy, oth = odom_x, odom_y, odom_th
         proc.stdin.write("%.3f %.3f %.4f %s\n" % (ox, oy, oth, " ".join(pts)))
@@ -229,6 +255,24 @@ try:
             continue
         update_map(ranges, angles, px, py, pth)
         traj.append([px, py])
+        # world points + keyframes + loop closure
+        c = math.cos(pth)
+        s = math.sin(pth)
+        P_world = np.column_stack([px + c * P_robot[:, 0] - s * P_robot[:, 1],
+                                   py + s * P_robot[:, 0] + c * P_robot[:, 1]])
+        if math.hypot(px - last_kf[0], py - last_kf[1]) > 0.5:
+            keyframes.append((px, py, pth, P_world))
+            last_kf = (px, py)
+        scan_n += 1
+        if scan_n % 10 == 0 and len(keyframes) > 10:
+            best, best_score = loop_closure(P_world, px, py)
+            if best is not None and best_score > 0.6:
+                bx, by, bth = best
+                off = math.hypot(bx - px, by - py)
+                if 0.3 < off < 1.5:
+                    px, py, pth = bx, by, bth
+                    pose = (px, py, pth)
+                    print("loop closed: %.2f m" % off, flush=True)
         if time.time() - last_write > WRITE_INTERVAL:
             tmp = SHM_MAP + '.tmp'
             with open(tmp, 'wb') as f:

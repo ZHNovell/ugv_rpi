@@ -92,8 +92,9 @@ def esp_reader():
                     pose_x += dxy * math.sin(pose_th)
                     pose_y -= dxy * math.cos(pose_th)
                     pose_th -= (esp['gz'] - gyro_bias) * GYRO_DEG_PER_LSB * math.pi / 180.0 * dt
-                    # compass fusion: slowly pull heading toward absolute magnetic heading
-                    if comp_offset is not None:
+                    # compass fusion DISABLED: raw magnetometer is distorted by
+                    # motors/metal (hard/soft iron), needs calibration before use
+                    if False and comp_offset is not None:
                         ch = math.atan2(esp['my'], esp['mx']) - comp_offset
                         diff = ch - pose_th
                         diff = (diff + math.pi) % (2 * math.pi) - math.pi

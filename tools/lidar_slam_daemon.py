@@ -267,12 +267,14 @@ try:
         proc.stdin.flush()
         out = proc.stdout.readline()
         try:
-            px, py, pth = map(float, out.split())
+            vals = list(map(float, out.split()))
+            lx, ly = vals[0], vals[1]
+            Tx, Ty, Tyaw = vals[3], vals[4], vals[5]
+            px, py, pth = vals[6], vals[7], vals[8]
             pose = (px, py, pth)
         except Exception:
             continue
-        rasterize(P_robot, px, py, pth)
-        traj.append([px, py])
+        traj.append([lx, ly])
         # keyframes + loop closure (pose graph)
         if math.hypot(px - last_kf[0], py - last_kf[1]) > 0.5:
             keyframes.append((px, py, pth, P_robot))
@@ -323,7 +325,8 @@ try:
                 pass
             tmp = SHM_POSE + '.tmp'
             data = {'x': px, 'y': py, 'theta': pth, 'ts': time.time(),
-                    'grid': GRID, 'res': 0.05, 'traj': traj[-2000:]}
+                    'grid': GRID, 'res': 0.05, 'traj': traj[-2000:],
+                    'Tx': Tx, 'Ty': Ty, 'Tyaw': Tyaw}
             with open(tmp, 'w') as f:
                 json.dump(data, f)
             os.rename(tmp, SHM_POSE)

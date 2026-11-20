@@ -217,7 +217,15 @@ int main(int argc, char** argv) {
     const Eigen::Quaterniond q = map_pose.rotation();
     const double yaw_out = 2.0 * std::atan2(q.z(), q.w());
 
-    std::cout << t.x() << " " << t.y() << " " << yaw_out << std::endl;
+    const Rigid3d local_to_global =
+        map_builder.pose_graph()->GetLocalToGlobalTransform(trajectory_id);
+    const Eigen::Vector3d lt = local_pose.translation();
+    const double lyaw = 2.0 * std::atan2(local_pose.rotation().z(), local_pose.rotation().w());
+    const Eigen::Vector3d T = local_to_global.translation();
+    const double Tyaw = 2.0 * std::atan2(local_to_global.rotation().z(), local_to_global.rotation().w());
+    std::cout << lt.x() << " " << lt.y() << " " << lyaw << " "
+              << T.x() << " " << T.y() << " " << Tyaw << " "
+              << t.x() << " " << t.y() << " " << yaw_out << std::endl;
 
     const double now = NowSeconds();
     if (now - last_map_write > 1.0) {

@@ -516,8 +516,17 @@ def slam_map():
     cy = g // 2
     img = cv2.cvtColor(255 - grid, cv2.COLOR_GRAY2BGR)
     traj = pose.get('traj', [])
+    Tx = pose.get('Tx', 0.0)
+    Ty = pose.get('Ty', 0.0)
+    Tyaw = pose.get('Tyaw', 0.0)
+    cT = np.cos(Tyaw)
+    sT = np.sin(Tyaw)
     if len(traj) > 1:
-        pts = [(int(round(p[0] / RES)) + cx, int(round(p[1] / RES)) + cy) for p in traj]
+        pts = []
+        for p in traj:
+            mx = Tx + cT * p[0] - sT * p[1]
+            my = Ty + sT * p[0] + cT * p[1]
+            pts.append((int(round(mx / RES)) + cx, int(round(my / RES)) + cy))
         for i in range(1, len(pts)):
             cv2.line(img, pts[i - 1], pts[i], (0, 200, 0), 2)
     rx = int(round(pose['x'] / RES)) + cx

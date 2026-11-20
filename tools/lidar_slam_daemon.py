@@ -12,7 +12,7 @@ ESP = '/dev/ttyACM0'
 LIDAR_BAUD = 230400
 ESP_BAUD = 115200
 APF = 12
-MAX_DIST = 12000
+MAX_DIST = 4000
 READ_TIME = 0.11
 DEAD_MIN = 50.0
 DEAD_MAX = 140.0
@@ -256,14 +256,19 @@ try:
             ra = aa * math.pi / 180.0
             xr = dd / 1000.0 * math.cos(ra)
             yr = dd / 1000.0 * math.sin(ra)
-            pts.append("%.3f %.3f" % (xr, yr))
-            P_robot.append((xr, yr))
+            pts.append("%.3f %.3f" % (-yr, xr))
+            P_robot.append((-yr, xr))
         if len(pts) < 30:
             continue
         P_robot = np.array(P_robot, np.float32).reshape(-1, 2)
         with theta_lock:
             ox, oy, oth = odom_x, odom_y, odom_th
-        proc.stdin.write("%.3f %.3f %.4f %s\n" % (ox, oy, oth, " ".join(pts)))
+        if not traj:
+            with open('/tmp/scan_debug.txt', 'w') as f:
+                f.write('oth %.4f ox %.3f oy %.3f n %d\n' % (oth, ox, oy, len(P_robot)))
+                for xr, yr in P_robot:
+                    f.write('%.3f %.3f\n' % (xr, yr))
+        proc.stdin.write("%.3f %.3f %.4f %s\n" % (-oy, ox, oth, " ".join(pts)))
         proc.stdin.flush()
         out = proc.stdout.readline()
         try:

@@ -74,6 +74,16 @@ void WriteMap(MapBuilder& map_builder, const std::string& path) {
       const double res = texture.resolution();
       const Rigid3d slice_pose =
           cartographer::transform::ToRigid3(texture.slice_pose());
+      {
+        static bool dumped = false;
+        if (!dumped) {
+          dumped = true;
+          std::ofstream dbg("/tmp/wm.txt");
+          dbg << "slice " << slice_pose.translation().x() << " " << slice_pose.translation().y() << "\n";
+          dbg << "wh " << w << " " << h << " res " << res << "\n";
+          dbg.close();
+        }
+      }
       for (int py = 0; py < h; ++py) {
         for (int px = 0; px < w; ++px) {
           const int idx = py * w + px;
@@ -87,7 +97,7 @@ void WriteMap(MapBuilder& map_builder, const std::string& path) {
           } else {
             map_val = 0;         // free
           }
-          const Eigen::Vector3d local(px * res, py * res, 0.0);
+          const Eigen::Vector3d local(px * res - w * res, py * res - h * res, 0.0);
           const Eigen::Vector3d world = slice_pose * local;
           const int gx = static_cast<int>(std::floor(world.x() / kResolution)) +
                          kGridSize / 2;

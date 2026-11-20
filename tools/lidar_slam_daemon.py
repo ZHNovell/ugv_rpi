@@ -256,8 +256,8 @@ try:
             ra = aa * math.pi / 180.0
             xr = dd / 1000.0 * math.cos(ra)
             yr = dd / 1000.0 * math.sin(ra)
-            pts.append("%.3f %.3f" % (-yr, xr))
-            P_robot.append((-yr, xr))
+            pts.append("%.3f %.3f" % (-xr, yr))
+            P_robot.append((-xr, yr))
         if len(pts) < 30:
             continue
         P_robot = np.array(P_robot, np.float32).reshape(-1, 2)
@@ -268,7 +268,7 @@ try:
                 f.write('oth %.4f ox %.3f oy %.3f n %d\n' % (oth, ox, oy, len(P_robot)))
                 for xr, yr in P_robot:
                     f.write('%.3f %.3f\n' % (xr, yr))
-        proc.stdin.write("%.3f %.3f %.4f %s\n" % (-oy, ox, oth, " ".join(pts)))
+        proc.stdin.write("%.3f %.3f %.4f %s\n" % (ox, oy, oth - math.pi / 2.0, " ".join(pts)))
         proc.stdin.flush()
         out = proc.stdout.readline()
         try:

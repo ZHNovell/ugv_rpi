@@ -30,7 +30,7 @@ NUM_POINTS = 432
 OCC_INC = 30
 FREE_DEC = 8
 
-HECTOR_BIN = '/root/hector_standalone/build/hector_standalone'
+HECTOR_BIN = '/root/carto_standalone/build/carto_standalone'
 
 esp = {'odl': 0, 'odr': 0, 'gz': 0.0, 'mx': 0, 'my': 0, 'v': 0, 'ts': 0.0}
 GYRO_DEG_PER_LSB = 0.06016  # calibrated +-2000 dps
@@ -314,12 +314,16 @@ try:
                     print("loop closed: %.2f m (reset+refeed)" % off, flush=True)
         if time.time() - last_write > WRITE_INTERVAL:
             tmp = SHM_MAP + '.tmp'
-            with open(tmp, 'wb') as f:
-                f.write(grid.tobytes())
-            os.rename(tmp, SHM_MAP)
+            try:
+                with open('/dev/shm/carto_map.raw', 'rb') as src:
+                    with open(tmp, 'wb') as f:
+                        f.write(src.read())
+                os.rename(tmp, SHM_MAP)
+            except Exception:
+                pass
             tmp = SHM_POSE + '.tmp'
             data = {'x': px, 'y': py, 'theta': pth, 'ts': time.time(),
-                    'grid': GRID, 'res': RES, 'traj': traj[-2000:]}
+                    'grid': GRID, 'res': 0.05, 'traj': traj[-2000:]}
             with open(tmp, 'w') as f:
                 json.dump(data, f)
             os.rename(tmp, SHM_POSE)

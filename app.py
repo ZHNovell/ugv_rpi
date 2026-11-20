@@ -513,7 +513,7 @@ def slam_map():
 
     RES = pose.get('res', 0.02)
     cx = g // 2
-    cy = int(g * 0.75)
+    cy = g // 2
     img = cv2.cvtColor(255 - grid, cv2.COLOR_GRAY2BGR)
     traj = pose.get('traj', [])
     if len(traj) > 1:

@@ -1,5 +1,7 @@
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -15,24 +17,102 @@
 
 #include "cartographer/common/configuration_file_resolver.h"
 #include "cartographer/common/lua_parameter_dictionary.h"
+#include "cartographer/common/port.h"
 #include "cartographer/common/time.h"
+#include "cartographer/mapping/id.h"
 #include "cartographer/mapping/map_builder.h"
+#include "cartographer/mapping/proto/submap_visualization.pb.h"
 #include "cartographer/mapping/trajectory_builder_interface.h"
+#include "cartographer/sensor/odometry_data.h"
 #include "cartographer/sensor/point_cloud.h"
 #include "cartographer/sensor/rangefinder_point.h"
 #include "cartographer/sensor/timed_point_cloud_data.h"
 #include "cartographer/transform/rigid_transform.h"
+#include "cartographer/transform/transform.h"
 
 #include "gflags/gflags.h"
 #include "glog/logging.h"
 
 namespace {
 
+using cartographer::common::FromUniversal;
+using cartographer::transform::Rigid3d;
+using cartographer::mapping::MapBuilder;
+using cartographer::mapping::proto::SubmapQuery;
+
 int64_t NowUtsTicks() {
   return std::chrono::duration_cast<std::chrono::nanoseconds>(
              std::chrono::steady_clock::now().time_since_epoch())
              .count() /
-         100;  // 100 ns ticks (UTS)
+         100;
+}
+
+double NowSeconds() {
+  return std::chrono::duration_cast<std::chrono::duration<double>>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+void WriteMap(MapBuilder& map_builder, const std::string& path) {
+  constexpr int kGridSize = 1000;
+  constexpr double kResolution = 0.05;  // m / cell
+  std::vector<uint8_t> grid(kGridSize * kGridSize, 128);  // 128 = unknown
+
+  const auto submap_poses = map_builder.pose_graph()->GetAllSubmapPoses();
+  for (const auto& entry : submap_poses) {
+    const auto& submap_id = entry.id;
+    SubmapQuery::Response response;
+    map_builder.SubmapToProto(submap_id, &response);
+    for (const auto& texture : response.textures()) {
+      std::string decompressed;
+      cartographer::common::FastGunzipString(texture.cells(), &decompressed);
+      const int w = texture.width();
+      const int h = texture.height();
+      if (static_cast<int>(decompressed.size()) < 2 * w * h) {
+        continue;
+      }
+      const double res = texture.resolution();
+      const Rigid3d slice_pose =
+          cartographer::transform::ToRigid3(texture.slice_pose());
+      for (int py = 0; py < h; ++py) {
+        for (int px = 0; px < w; ++px) {
+          const int idx = py * w + px;
+          const uint8_t value = static_cast<uint8_t>(decompressed[2 * idx]);
+          const uint8_t alpha = static_cast<uint8_t>(decompressed[2 * idx + 1]);
+          uint8_t map_val;
+          if (alpha == 0) {
+            map_val = 128;       // unknown
+          } else if (value == 0) {
+            map_val = 255;       // wall
+          } else {
+            map_val = 0;         // free
+          }
+          const Eigen::Vector3d local(px * res, py * res, 0.0);
+          const Eigen::Vector3d world = slice_pose * local;
+          const int gx = static_cast<int>(std::floor(world.x() / kResolution)) +
+                         kGridSize / 2;
+          const int gy = static_cast<int>(std::floor(world.y() / kResolution)) +
+                         kGridSize / 2;
+          if (gx < 0 || gx >= kGridSize || gy < 0 || gy >= kGridSize) {
+            continue;
+          }
+          uint8_t& cell = grid[gy * kGridSize + gx];
+          if (map_val == 255) {
+            cell = 255;
+          } else if (map_val == 0 && cell == 128) {
+            cell = 0;
+          }
+        }
+      }
+    }
+  }
+
+  const std::string tmp = path + ".tmp";
+  std::ofstream ofs(tmp, std::ios::binary);
+  ofs.write(reinterpret_cast<const char*>(grid.data()),
+            static_cast<std::streamsize>(grid.size()));
+  ofs.close();
+  std::rename(tmp.c_str(), path.c_str());
 }
 
 }  // namespace
@@ -41,11 +121,12 @@ int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
   google::ParseCommandLineFlags(&argc, &argv, true);
 
-  using cartographer::mapping::MapBuilder;
   using cartographer::mapping::TrajectoryBuilderInterface;
   using cartographer::common::ConfigurationFileResolver;
   using cartographer::common::LuaParameterDictionary;
-  using cartographer::transform::Rigid3d;
+  using cartographer::sensor::OdometryData;
+  using cartographer::sensor::TimedPointCloud;
+  using cartographer::sensor::TimedPointCloudData;
 
   const std::string config_dir =
       "/usr/local/share/cartographer/configuration_files";
@@ -67,9 +148,9 @@ int main(int argc, char** argv) {
 
   using SensorId = TrajectoryBuilderInterface::SensorId;
   const std::set<SensorId> expected_sensor_ids = {
-      SensorId{SensorId::SensorType::RANGE, "echoes"}};
+      SensorId{SensorId::SensorType::RANGE, "echoes"},
+      SensorId{SensorId::SensorType::ODOMETRY, "odometry"}};
 
-  // Store the latest local SLAM pose estimate (written from the SLAM thread).
   Rigid3d latest_local_pose = Rigid3d::Identity();
   std::mutex pose_mutex;
 
@@ -88,6 +169,8 @@ int main(int argc, char** argv) {
       map_builder.GetTrajectoryBuilder(trajectory_id);
   CHECK(trajectory_builder != nullptr);
 
+  double last_map_write = 0.0;
+
   std::string line;
   while (std::getline(std::cin, line)) {
     std::istringstream iss(line);
@@ -96,7 +179,7 @@ int main(int argc, char** argv) {
       continue;
     }
 
-    cartographer::sensor::TimedPointCloud ranges;
+    TimedPointCloud ranges;
     float px = 0.0f, py = 0.0f;
     while (iss >> px >> py) {
       ranges.push_back({Eigen::Vector3f(px, py, 0.0f), 0.0f});
@@ -105,12 +188,21 @@ int main(int argc, char** argv) {
       continue;
     }
 
-    cartographer::sensor::TimedPointCloudData data;
-    data.time = cartographer::common::FromUniversal(NowUtsTicks());
-    data.origin =
-        Eigen::Vector3f(static_cast<float>(x), static_cast<float>(y), 0.0f);
-    data.ranges = std::move(ranges);
+    const cartographer::common::Time time = FromUniversal(NowUtsTicks());
 
+    // Odometry (pose of the robot / range sensor in the tracking frame).
+    const Rigid3d odom_pose(
+        Eigen::Vector3d(x, y, 0.0),
+        Eigen::Quaterniond(std::cos(yaw / 2.0), 0.0, 0.0,
+                           std::sin(yaw / 2.0)));
+    trajectory_builder->AddSensorData(
+        "odometry", OdometryData{time, odom_pose});
+
+    // Range data: origin is the fixed lidar offset (center-mounted => 0,0,0).
+    TimedPointCloudData data;
+    data.time = time;
+    data.origin = Eigen::Vector3f(0.0f, 0.0f, 0.0f);
+    data.ranges = std::move(ranges);
     trajectory_builder->AddSensorData("echoes", data);
 
     Rigid3d local_pose;
@@ -126,8 +218,15 @@ int main(int argc, char** argv) {
     const double yaw_out = 2.0 * std::atan2(q.z(), q.w());
 
     std::cout << t.x() << " " << t.y() << " " << yaw_out << std::endl;
+
+    const double now = NowSeconds();
+    if (now - last_map_write > 1.0) {
+      last_map_write = now;
+      WriteMap(map_builder, "/dev/shm/carto_map.raw");
+    }
   }
 
   map_builder.FinishTrajectory(trajectory_id);
+  WriteMap(map_builder, "/dev/shm/carto_map.raw");
   return 0;
 }

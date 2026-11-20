@@ -133,10 +133,13 @@ def read_scan():
             pkt = buf[:47]
             buf = buf[47:]
             start = (pkt[5] << 8 | pkt[4]) * 0.01
+            end = (pkt[43] << 8 | pkt[42]) * 0.01
+            diff = (end - start + 360.0) % 360.0
+            step = diff / (APF - 1)
             for i in range(APF):
                 off = 6 + i * 3
                 d = pkt[off + 1] << 8 | pkt[off]
-                a = (start + i * 0.83333 + 180) % 360
+                a = (start + i * step + 180) % 360
                 if 150 < d <= MAX_DIST:
                     angles.append(a)
                     dists.append(d)
@@ -160,18 +163,15 @@ def read_scan():
     return r, grid_a
 
 
-def update_map(ranges, angles, rx, ry, rth):
+def rasterize(robot_pts, rx, ry, rth):
     rx0 = int(round(rx / RES)) + cx
     ry0 = int(round(ry / RES)) + cy
-    d = np.asarray(ranges, np.float32)
-    a = np.asarray(angles, np.float32)
-    valid = d > 0
-    ra = a[valid] * (math.pi / 180.0)
-    dd = d[valid] / 1000.0
-    px = dd * np.cos(ra)
-    py = dd * np.sin(ra)
-    wx = rx + math.cos(rth) * px - math.sin(rth) * py
-    wy = ry + math.sin(rth) * px + math.cos(rth) * py
+    px = robot_pts[:, 0]
+    py = robot_pts[:, 1]
+    c = math.cos(rth)
+    s = math.sin(rth)
+    wx = rx + c * px - s * py
+    wy = ry + s * px + c * py
     gx = np.round(wx / RES).astype(np.int32) + cx
     gy = np.round(wy / RES).astype(np.int32) + cy
     inb = (gx >= 0) & (gx < GRID) & (gy >= 0) & (gy < GRID)
@@ -192,25 +192,43 @@ def update_map(ranges, angles, rx, ry, rth):
             grid[fyv, fxv] = np.clip(grid[fyv, fxv].astype(np.int16) - FREE_DEC, 0, 255).astype(np.uint8)
 
 
-keyframes = []  # (x, y, th, pts_world)
+def rebuild_map():
+    global grid
+    grid = np.full((GRID, GRID), 128, np.uint8)
+    for kf in keyframes:
+        x, y, th, rpts = kf
+        rasterize(rpts, x, y, th)
+
+
+keyframes = []  # (x, y, th, robot_pts)
 last_kf = (0.0, 0.0)
 scan_n = 0
 
 
-def loop_closure(pts_world, px, py):
+def loop_closure(cur_robot_pts, px, py, pth):
+    c = math.cos(pth)
+    s = math.sin(pth)
+    cur_world = np.column_stack([px + c * cur_robot_pts[:, 0] - s * cur_robot_pts[:, 1],
+                                 py + s * cur_robot_pts[:, 0] + c * cur_robot_pts[:, 1]])
     best = None
     best_score = 0.0
-    for kf in keyframes:
-        kx, ky, kth, kpts = kf
+    best_idx = -1
+    for idx, kf in enumerate(keyframes):
+        kx, ky, kth, rpts = kf
         if math.hypot(kx - px, ky - py) > 2.0:
             continue
-        d2 = ((pts_world[:, None, :] - kpts[None, :, :]) ** 2).sum(-1)
+        kc = math.cos(kth)
+        ks = math.sin(kth)
+        k_world = np.column_stack([kx + kc * rpts[:, 0] - ks * rpts[:, 1],
+                                   ky + ks * rpts[:, 0] + kc * rpts[:, 1]])
+        d2 = ((cur_world[:, None, :] - k_world[None, :, :]) ** 2).sum(-1)
         dmin = d2.min(axis=1)
         score = float((dmin < 0.01).mean())  # fraction within 0.1 m
         if score > best_score:
             best_score = score
             best = (kx, ky, kth)
-    return best, best_score
+            best_idx = idx
+    return best, best_score, best_idx
 
 
 threading.Thread(target=esp_reader, daemon=True).start()
@@ -253,26 +271,47 @@ try:
             pose = (px, py, pth)
         except Exception:
             continue
-        update_map(ranges, angles, px, py, pth)
+        rasterize(P_robot, px, py, pth)
         traj.append([px, py])
-        # world points + keyframes + loop closure
-        c = math.cos(pth)
-        s = math.sin(pth)
-        P_world = np.column_stack([px + c * P_robot[:, 0] - s * P_robot[:, 1],
-                                   py + s * P_robot[:, 0] + c * P_robot[:, 1]])
+        # keyframes + loop closure (pose graph)
         if math.hypot(px - last_kf[0], py - last_kf[1]) > 0.5:
-            keyframes.append((px, py, pth, P_world))
+            keyframes.append((px, py, pth, P_robot))
             last_kf = (px, py)
         scan_n += 1
-        if scan_n % 10 == 0 and len(keyframes) > 10:
-            best, best_score = loop_closure(P_world, px, py)
+        if False and scan_n % 10 == 0 and len(keyframes) > 10:
+            best, best_score, best_idx = loop_closure(P_robot, px, py, pth)
             if best is not None and best_score > 0.6:
                 bx, by, bth = best
                 off = math.hypot(bx - px, by - py)
                 if 0.3 < off < 1.5:
+                    dx = bx - px
+                    dy = by - py
+                    dth = bth - pth
+                    N = len(keyframes)
+                    # distribute the correction (pose graph)
+                    for i in range(best_idx, N):
+                        frac = (i - best_idx) / float(max(1, N - 1 - best_idx))
+                        kx, ky, kth, rpts = keyframes[i]
+                        keyframes[i] = (kx + dx * frac, ky + dy * frac, kth + dth * frac, rpts)
+                    # reset Hector + re-feed corrected keyframes (fix its map too)
+                    proc.stdin.write("RESET\n")
+                    proc.stdin.flush()
+                    proc.stdout.readline()
+                    for kf in keyframes:
+                        kx, ky, kth, rpts = kf
+                        kpts = " ".join("%.3f %.3f" % (p[0], p[1]) for p in rpts)
+                        proc.stdin.write("%.3f %.3f %.4f %s\n" % (kx, ky, kth, kpts))
+                    proc.stdin.flush()
+                    for _ in range(len(keyframes)):
+                        proc.stdout.readline()
+                    rebuild_map()
+                    with theta_lock:
+                        odom_x += dx
+                        odom_y += dy
+                        odom_th += dth
                     px, py, pth = bx, by, bth
                     pose = (px, py, pth)
-                    print("loop closed: %.2f m" % off, flush=True)
+                    print("loop closed: %.2f m (reset+refeed)" % off, flush=True)
         if time.time() - last_write > WRITE_INTERVAL:
             tmp = SHM_MAP + '.tmp'
             with open(tmp, 'wb') as f:

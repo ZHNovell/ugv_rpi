@@ -469,11 +469,11 @@ def cmdline_ctrl(args_string):
         elif main_type == 2:
             f['base_config']['robot_name'] = "UGV Rover"
             f['args_config']['max_speed'] = 1.3
-            f['args_config']['slow_speed'] = 0.2
+            f['args_config']['slow_speed'] = 0.1
         elif main_type == 3:
             f['base_config']['robot_name'] = "UGV Beast"
             f['args_config']['max_speed'] = 1.0
-            f['args_config']['slow_speed'] = 0.2
+            f['args_config']['slow_speed'] = 0.1
         f['base_config']['main_type'] = main_type
         f['base_config']['module_type'] = module_type
         with open(thisPath + '/config.yaml', "w") as yaml_file:
@@ -514,7 +514,7 @@ def slam_map():
     RES = pose.get('res', 0.02)
     cx = g // 2
     cy = int(g * 0.75)
-    img = cv2.cvtColor(grid, cv2.COLOR_GRAY2BGR)
+    img = cv2.cvtColor(255 - grid, cv2.COLOR_GRAY2BGR)
     traj = pose.get('traj', [])
     if len(traj) > 1:
         pts = [(int(round(p[0] / RES)) + cx, int(round(p[1] / RES)) + cy) for p in traj]

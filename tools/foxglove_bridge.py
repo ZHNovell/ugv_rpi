@@ -56,26 +56,6 @@ MAX_PATH_POINTS = 500
 # Schema definitions (self-contained ROS 2 .msg text, base64-encoded in the
 # advertise message). These match the official foxglove-sdk schemas.
 # ---------------------------------------------------------------------------
-_SEP = "=" * 80
-
-_POSE_MSGS = (
-    _SEP + "\n"
-    "MSG: geometry_msgs/Pose\n"
-    "geometry_msgs/Point position\n"
-    "geometry_msgs/Quaternion orientation\n"
-    + _SEP + "\n"
-    "MSG: geometry_msgs/Point\n"
-    "float64 x\n"
-    "float64 y\n"
-    "float64 z\n"
-    + _SEP + "\n"
-    "MSG: geometry_msgs/Quaternion\n"
-    "float64 x\n"
-    "float64 y\n"
-    "float64 z\n"
-    "float64 w\n"
-)
-
 GRID_SCHEMA = (
     "builtin_interfaces/Time timestamp\n"
     "string frame_id\n"
@@ -86,30 +66,18 @@ GRID_SCHEMA = (
     "uint32 cell_stride\n"
     "foxglove_msgs/PackedElementField[] fields\n"
     "uint8[] data\n"
-    + _POSE_MSGS
-    + _SEP + "\n"
-    "MSG: foxglove_msgs/Vector2\n"
-    "float64 x\n"
-    "float64 y\n"
-    + _SEP + "\n"
-    "MSG: foxglove_msgs/PackedElementField\n"
-    "string name\n"
-    "uint32 offset\n"
-    "uint8 type\n"
 )
 
 POSE_IN_FRAME_SCHEMA = (
     "builtin_interfaces/Time timestamp\n"
     "string frame_id\n"
     "geometry_msgs/Pose pose\n"
-    + _POSE_MSGS
 )
 
 PATH_SCHEMA = (
     "builtin_interfaces/Time timestamp\n"
     "string frame_id\n"
     "geometry_msgs/Pose[] poses\n"
-    + _POSE_MSGS
 )
 
 CHANNELS = [
@@ -117,21 +85,21 @@ CHANNELS = [
         "id": 1,
         "topic": "/map",
         "encoding": "cdr",
-        "schemaName": "foxglove.Grid",
+        "schemaName": "foxglove_msgs/Grid",
         "schema": base64.b64encode(GRID_SCHEMA.encode("utf-8")).decode("ascii"),
     },
     {
         "id": 2,
         "topic": "/pose",
         "encoding": "cdr",
-        "schemaName": "foxglove.PoseInFrame",
+        "schemaName": "foxglove_msgs/PoseInFrame",
         "schema": base64.b64encode(POSE_IN_FRAME_SCHEMA.encode("utf-8")).decode("ascii"),
     },
     {
         "id": 3,
         "topic": "/trajectory",
         "encoding": "cdr",
-        "schemaName": "foxglove.Path",
+        "schemaName": "foxglove_msgs/Path",
         "schema": base64.b64encode(PATH_SCHEMA.encode("utf-8")).decode("ascii"),
     },
 ]

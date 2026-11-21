@@ -149,7 +149,7 @@ CHANNELS = [
         "id": 3,
         "topic": "/trajectory",
         "encoding": "cdr",
-        "schemaName": "foxglove_msgs/msg/Path",
+        "schemaName": "foxglove_msgs/msg/PosesInFrame",
         "schemaEncoding": "ros2msg",
         "schema": PATH_SCHEMA,
     },

@@ -56,28 +56,76 @@ MAX_PATH_POINTS = 500
 # Schema definitions (self-contained ROS 2 .msg text, base64-encoded in the
 # advertise message). These match the official foxglove-sdk schemas.
 # ---------------------------------------------------------------------------
-GRID_SCHEMA = (
-    "builtin_interfaces/Time timestamp\n"
-    "string frame_id\n"
-    "geometry_msgs/Pose pose\n"
-    "uint32 column_count\n"
-    "foxglove_msgs/Vector2 cell_size\n"
-    "uint32 row_stride\n"
-    "uint32 cell_stride\n"
-    "foxglove_msgs/PackedElementField[] fields\n"
-    "uint8[] data\n"
+_SEP80 = "=" * 80
+
+
+def _cat(schemas):
+    """ros2msg concatenated .msg format: top-level first, then deps each
+    preceded by an 80-'=' line and a 'MSG: <package resource name>' line."""
+    parts = [schemas[0]]
+    for name, body in schemas[1:]:
+        parts.append(_SEP80 + "\nMSG: " + name + "\n" + body)
+    return "\n".join(parts)
+
+
+_TIME_MSG = ("builtin_interfaces/msg/Time", "int32 sec\nuint32 nanosec\n")
+_POSE_MSG = (
+    "geometry_msgs/msg/Pose",
+    "geometry_msgs/msg/Point position\ngeometry_msgs/msg/Quaternion orientation\n",
+)
+_POINT_MSG = ("geometry_msgs/msg/Point", "float64 x\nfloat64 y\nfloat64 z\n")
+_QUAT_MSG = (
+    "geometry_msgs/msg/Quaternion",
+    "float64 x\nfloat64 y\nfloat64 z\nfloat64 w\n",
+)
+_VEC2_MSG = ("foxglove_msgs/msg/Vector2", "float64 x\nfloat64 y\n")
+_FIELD_MSG = (
+    "foxglove_msgs/msg/PackedElementField",
+    "string name\nuint32 offset\nuint8 type\n",
 )
 
-POSE_IN_FRAME_SCHEMA = (
-    "builtin_interfaces/Time timestamp\n"
-    "string frame_id\n"
-    "geometry_msgs/Pose pose\n"
+GRID_SCHEMA = _cat(
+    [
+        "builtin_interfaces/msg/Time timestamp\n"
+        "string frame_id\n"
+        "geometry_msgs/msg/Pose pose\n"
+        "uint32 column_count\n"
+        "foxglove_msgs/msg/Vector2 cell_size\n"
+        "uint32 row_stride\n"
+        "uint32 cell_stride\n"
+        "foxglove_msgs/msg/PackedElementField[] fields\n"
+        "uint8[] data\n",
+        _TIME_MSG,
+        _POSE_MSG,
+        _POINT_MSG,
+        _QUAT_MSG,
+        _VEC2_MSG,
+        _FIELD_MSG,
+    ]
 )
 
-PATH_SCHEMA = (
-    "builtin_interfaces/Time timestamp\n"
-    "string frame_id\n"
-    "geometry_msgs/Pose[] poses\n"
+POSE_IN_FRAME_SCHEMA = _cat(
+    [
+        "builtin_interfaces/msg/Time timestamp\n"
+        "string frame_id\n"
+        "geometry_msgs/msg/Pose pose\n",
+        _TIME_MSG,
+        _POSE_MSG,
+        _POINT_MSG,
+        _QUAT_MSG,
+    ]
+)
+
+PATH_SCHEMA = _cat(
+    [
+        "builtin_interfaces/msg/Time timestamp\n"
+        "string frame_id\n"
+        "geometry_msgs/msg/Pose[] poses\n",
+        _TIME_MSG,
+        _POSE_MSG,
+        _POINT_MSG,
+        _QUAT_MSG,
+    ]
 )
 
 CHANNELS = [
@@ -85,22 +133,25 @@ CHANNELS = [
         "id": 1,
         "topic": "/map",
         "encoding": "cdr",
-        "schemaName": "foxglove_msgs/Grid",
-        "schema": base64.b64encode(GRID_SCHEMA.encode("utf-8")).decode("ascii"),
+        "schemaName": "foxglove_msgs/msg/Grid",
+        "schemaEncoding": "ros2msg",
+        "schema": GRID_SCHEMA,
     },
     {
         "id": 2,
         "topic": "/pose",
         "encoding": "cdr",
-        "schemaName": "foxglove_msgs/PoseInFrame",
-        "schema": base64.b64encode(POSE_IN_FRAME_SCHEMA.encode("utf-8")).decode("ascii"),
+        "schemaName": "foxglove_msgs/msg/PoseInFrame",
+        "schemaEncoding": "ros2msg",
+        "schema": POSE_IN_FRAME_SCHEMA,
     },
     {
         "id": 3,
         "topic": "/trajectory",
         "encoding": "cdr",
-        "schemaName": "foxglove_msgs/Path",
-        "schema": base64.b64encode(PATH_SCHEMA.encode("utf-8")).decode("ascii"),
+        "schemaName": "foxglove_msgs/msg/Path",
+        "schemaEncoding": "ros2msg",
+        "schema": PATH_SCHEMA,
     },
 ]
 

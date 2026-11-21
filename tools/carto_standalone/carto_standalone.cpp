@@ -97,10 +97,10 @@ void WriteMap(MapBuilder& map_builder, const std::string& path) {
           } else {
             map_val = 0;         // free
           }
-          const Eigen::Vector3d local(px * res - w * res, py * res - h * res, 0.0);
+          const Eigen::Vector3d local(-py * res, -px * res, 0.0);
           const Eigen::Vector3d world = slice_pose * local;
-          const int gx = static_cast<int>(std::floor(world.x() / kResolution)) +
-                         kGridSize / 2;
+          const int gx = kGridSize / 2 -
+                         static_cast<int>(std::floor(world.x() / kResolution));
           const int gy = static_cast<int>(std::floor(world.y() / kResolution)) +
                          kGridSize / 2;
           if (gx < 0 || gx >= kGridSize || gy < 0 || gy >= kGridSize) {

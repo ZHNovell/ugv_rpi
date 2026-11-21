@@ -268,7 +268,7 @@ try:
                 f.write('oth %.4f ox %.3f oy %.3f n %d\n' % (oth, ox, oy, len(P_robot)))
                 for xr, yr in P_robot:
                     f.write('%.3f %.3f\n' % (xr, yr))
-        proc.stdin.write("%.3f %.3f %.4f %s\n" % (ox, oy, oth - math.pi / 2.0, " ".join(pts)))
+        proc.stdin.write("%.3f %.3f %.4f %s\n" % (ox, oy, oth, " ".join(pts)))
         proc.stdin.flush()
         out = proc.stdout.readline()
         try:

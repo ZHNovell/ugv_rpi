@@ -101,7 +101,7 @@ def esp_reader():
                     dxy = (dr + dl) / 2.0
                     odom_x += dxy * math.sin(odom_th)
                     odom_y -= dxy * math.cos(odom_th)
-                odom_th += (esp['gz'] - gyro_bias) * GYRO_DEG_PER_LSB * math.pi / 180.0 * dt
+                odom_th -= (esp['gz'] - gyro_bias) * GYRO_DEG_PER_LSB * math.pi / 180.0 * dt
                 prev_odl = esp['odl']
                 prev_odr = esp['odr']
             tmp = SHM_ESP + '.tmp'

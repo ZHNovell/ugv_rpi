@@ -104,11 +104,20 @@ class GstStream:
 
     # ---------- pipeline ----------
     def build_pipeline(self):
+        # HW-декодер omxmjpegvideodec (Allwinner CedarC) стабилен только до 720p;
+        # на 1080p он падает (fatal pInBufHdr is NULL). Выше 720p — софт jpegdec.
+        if self.height <= 720:
+            decoder = "omxmjpegvideodec"
+            io_mode = ""  # hw-декодер протестирован стабильно на mmap (io-mode по умолчанию)
+        else:
+            decoder = "jpegdec"
+            io_mode = " io-mode=dmabuf"
         pipeline_str = (
-            f"v4l2src device={self.device} io-mode=dmabuf ! "
+            f"v4l2src device={self.device}{io_mode} ! "
             f"image/jpeg,width={self.width},height={self.height} ! "
-            f"jpegdec ! tee name=t "
+            f"{decoder} ! tee name=t "
             # Ветка 1: appsink для Python (превью/детекция)
+            # HW-декодер даёт YV12/NV21 — конвертируем один раз в BGR для OpenCV/NPU
             f"t. ! queue max-size-buffers=2 leaky=downstream ! "
             f"videoconvert ! video/x-raw,format=BGR ! "
             f"appsink name=appsink max-buffers=1 drop=true emit-signals=true sync=false "

@@ -99,8 +99,8 @@ def esp_reader():
                     dl = (esp['odl'] - prev_odl) * ENC_MM_PER_TICK / 1000.0
                     dr = (esp['odr'] - prev_odr) * ENC_MM_PER_TICK / 1000.0
                     dxy = (dr + dl) / 2.0
-                    odom_x += dxy * math.sin(odom_th)
-                    odom_y -= dxy * math.cos(odom_th)
+                    odom_x += dxy * math.cos(odom_th)
+                    odom_y += dxy * math.sin(odom_th)
                 odom_th -= (esp['gz'] - gyro_bias) * GYRO_DEG_PER_LSB * math.pi / 180.0 * dt
                 prev_odl = esp['odl']
                 prev_odr = esp['odr']

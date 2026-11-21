@@ -90,7 +90,7 @@ void WriteMap(MapBuilder& map_builder, const std::string& path) {
           const uint8_t value = static_cast<uint8_t>(decompressed[2 * idx]);
           const uint8_t alpha = static_cast<uint8_t>(decompressed[2 * idx + 1]);
           uint8_t map_val;
-          if (alpha == 0) {
+          if (value == 0 && alpha == 0) {
             map_val = 128;       // unknown
           } else if (value == 0) {
             map_val = 255;       // wall

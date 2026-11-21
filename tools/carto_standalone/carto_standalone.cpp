@@ -99,7 +99,7 @@ void WriteMap(MapBuilder& map_builder, const std::string& path) {
           }
           const Eigen::Vector3d local(-py * res, -px * res, 0.0);
           const Eigen::Vector3d world = slice_pose * local;
-          const int gx = kGridSize / 2 -
+          const int gx = kGridSize / 2 +
                          static_cast<int>(std::floor(world.x() / kResolution));
           const int gy = static_cast<int>(std::floor(world.y() / kResolution)) +
                          kGridSize / 2;

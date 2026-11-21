@@ -79,6 +79,10 @@ _QUAT_MSG = (
     "float64 x\nfloat64 y\nfloat64 z\nfloat64 w\n",
 )
 _VEC2_MSG = ("foxglove_msgs/msg/Vector2", "float64 x\nfloat64 y\n")
+_VEC3_MSG = (
+    "geometry_msgs/msg/Vector3",
+    "float64 x\nfloat64 y\nfloat64 z\n",
+)
 _FIELD_MSG = (
     "foxglove_msgs/msg/PackedElementField",
     "string name\nuint32 offset\nuint8 type\n",
@@ -128,6 +132,26 @@ PATH_SCHEMA = _cat(
     ]
 )
 
+_FRAME_TRANSFORM_MSG = (
+    "foxglove_msgs/msg/FrameTransform",
+    "builtin_interfaces/msg/Time timestamp\n"
+    "string parent_frame_id\n"
+    "string child_frame_id\n"
+    "geometry_msgs/msg/Vector3 translation\n"
+    "geometry_msgs/msg/Quaternion rotation\n",
+)
+
+FRAME_TRANSFORMS_SCHEMA = _cat(
+    [
+        "builtin_interfaces/msg/Time timestamp\n"
+        "foxglove_msgs/msg/FrameTransform[] transforms\n",
+        _TIME_MSG,
+        _FRAME_TRANSFORM_MSG,
+        _VEC3_MSG,
+        _QUAT_MSG,
+    ]
+)
+
 CHANNELS = [
     {
         "id": 1,
@@ -152,6 +176,14 @@ CHANNELS = [
         "schemaName": "foxglove_msgs/msg/PosesInFrame",
         "schemaEncoding": "ros2msg",
         "schema": PATH_SCHEMA,
+    },
+    {
+        "id": 4,
+        "topic": "/tf",
+        "encoding": "cdr",
+        "schemaName": "foxglove_msgs/msg/FrameTransforms",
+        "schemaEncoding": "ros2msg",
+        "schema": FRAME_TRANSFORMS_SCHEMA,
     },
 ]
 
@@ -275,6 +307,31 @@ def build_path_payload(ts_ns, points):
     return w.finish()
 
 
+def build_tf_payload(ts_ns):
+    """Static identity transform declaring the "map" frame (root/world frame).
+
+    Foxglove Studio discovers display frames only from a FrameTransforms
+    (/tf) channel, so without this the 3D panel's "Display frame" list is
+    empty. We advertise one root frame "map" (empty parent = world root).
+    """
+    w = CdrWriter()
+    cdr_time(w, ts_ns)               # FrameTransforms.timestamp
+    w.uint32(1)                      # transforms: sequence length
+    cdr_time(w, ts_ns)               # FrameTransform.timestamp
+    w.string("")                     # parent_frame_id (empty = root)
+    w.string("map")                  # child_frame_id
+    # translation (Vector3)
+    w.float64(0.0)
+    w.float64(0.0)
+    w.float64(0.0)
+    # rotation (Quaternion, identity)
+    w.float64(0.0)
+    w.float64(0.0)
+    w.float64(0.0)
+    w.float64(1.0)
+    return w.finish()
+
+
 def message_data(subscription_id, ts_ns, payload):
     """Binary "Message Data" frame: opcode 0x01, uint32 sub id, uint64 ts, payload."""
     return (
@@ -343,6 +400,7 @@ async def tick_loop():
         grid_payload = None
         pose_payload = None
         path_payload = None
+        tf_payload = build_tf_payload(ts_ns)
 
         try:
             cell_data = read_map_cells()
@@ -372,6 +430,8 @@ async def tick_loop():
                     payload = pose_payload
                 elif channel_id == 3:
                     payload = path_payload
+                elif channel_id == 4:
+                    payload = tf_payload
                 if payload is not None:
                     try:
                         await ws.send(message_data(sub_id, ts_ns, payload))
@@ -398,7 +458,7 @@ async def handler(websocket):
                 for sub in msg.get("subscriptions", []):
                     channel_id = sub.get("channelId")
                     sub_id = sub.get("id")
-                    if channel_id in (1, 2, 3):
+                    if channel_id in (1, 2, 3, 4):
                         CLIENTS[websocket][channel_id] = sub_id
             elif op == "unsubscribe":
                 ids = set(msg.get("subscriptionIds", []))

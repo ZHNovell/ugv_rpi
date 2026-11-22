@@ -1,0 +1,27 @@
+# ROS 2 Humble container for UGV (Stage 1: base verification)
+# Base: Ubuntu 22.04 (jammy) arm64 — official ROS Humble target.
+FROM arm64v8/ubuntu:jammy
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ROS 2 Humble key + repo
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl gnupg2 lsb-release ca-certificates locales \
+    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+       -o /usr/share/keyrings/ros-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" \
+       > /etc/apt/sources.list.d/ros2.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    ros-humble-ros-base \
+    python3-colcon-common-extensions \
+    python3-rosdep \
+    && rm -rf /var/lib/apt/lists/*
+
+# rosdep init (offline-safe)
+RUN rosdep init || true && rosdep update || true
+
+# Setup environment
+RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
+
+# Default entry: a long-running bash so we can `docker exec` into it
+CMD ["/bin/bash"]

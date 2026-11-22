@@ -642,7 +642,17 @@ def base_data_loop():
     sensor_interval = 1
     sensor_read_time = time.time()
     while True:
-        cvf.update_base_data(base.feedback_data())
+        fb = base.feedback_data()
+        cvf.update_base_data(fb)
+        # bridge ESP32 telemetry to ROS container via /dev/shm (atomic)
+        if fb and fb.get('T') == 1001:
+            try:
+                _tmp = '/dev/shm/esp_telemetry.json.tmp'
+                with open(_tmp, 'w') as _f:
+                    json.dump(fb, _f)
+                os.rename(_tmp, '/dev/shm/esp_telemetry.json')
+            except Exception:
+                pass
         # arm state (только для module_type != 2, т.е. не PT)
         if f['base_config']['module_type'] != 2:
             base.base_json_ctrl({"T":105})

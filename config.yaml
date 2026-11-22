@@ -17,7 +17,7 @@ args_config:
   pt_p_gain: 7.0
   pt_servo_acc: 0
   pt_servo_spd: 3000
-  slam_mode: true
+  slam_mode: false
   slow_speed: 0.1
 audio_config:
   audio_output: true

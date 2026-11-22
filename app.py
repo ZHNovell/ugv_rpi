@@ -494,56 +494,6 @@ def offer_route():
 def video_feed():
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-@app.route('/map')
-def slam_map():
-    import cv2
-    import numpy as np
-    try:
-        with open('/dev/shm/ugv_slam_map.raw', 'rb') as f:
-            raw = f.read()
-        with open('/dev/shm/ugv_slam_pose.json') as f:
-            pose = json.load(f)
-        g = pose.get('grid', 1000)
-        grid = np.frombuffer(raw, dtype=np.uint8).reshape((g, g))
-    except Exception:
-        img = 128 * np.ones((480, 640, 3), np.uint8)
-        cv2.putText(img, "SLAM map not ready", (110, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-        ret, buf = cv2.imencode('.png', img)
-        return Response(buf.tobytes(), mimetype='image/png')
-
-    RES = pose.get('res', 0.02)
-    cx = g // 2
-    cy = g // 2
-    img = cv2.cvtColor(255 - grid, cv2.COLOR_GRAY2BGR)
-    traj = pose.get('traj', [])
-    Tx = pose.get('Tx', 0.0)
-    Ty = pose.get('Ty', 0.0)
-    Tyaw = pose.get('Tyaw', 0.0)
-    cT = np.cos(Tyaw)
-    sT = np.sin(Tyaw)
-    if len(traj) > 1:
-        pts = []
-        for p in traj:
-            mx = Tx + cT * p[0] - sT * p[1]
-            my = Ty + sT * p[0] + cT * p[1]
-            pts.append((int(round(mx / RES)) + cx, int(round(my / RES)) + cy))
-        for i in range(1, len(pts)):
-            cv2.line(img, pts[i - 1], pts[i], (0, 200, 0), 2)
-    rx = int(round(pose['x'] / RES)) + cx
-    ry = int(round(pose['y'] / RES)) + cy
-    cv2.circle(img, (rx, ry), 9, (0, 0, 255), -1)
-    th = pose.get('theta', 0.0)
-    hx = int(rx + 45 * np.sin(th))
-    hy = int(ry - 45 * np.cos(th))
-    cv2.line(img, (rx, ry), (hx, hy), (0, 0, 255), 3)
-    ret, buf = cv2.imencode('.png', img)
-    return Response(buf.tobytes(), mimetype='image/png')
-
-
-@app.route('/map_view')
-def map_view():
-    return render_template('map.html')
-
 @app.route('/send_command', methods=['POST'])
 def handle_command():
     command = request.form['command']
@@ -691,26 +641,14 @@ def update_data_loop():
 def base_data_loop():
     sensor_interval = 1
     sensor_read_time = time.time()
-    slam_mode = f['args_config'].get('slam_mode', False)
     while True:
-        if not slam_mode:
-            cvf.update_base_data(base.feedback_data())
-            # arm state (только для module_type != 2, т.е. не PT)
-            if f['base_config']['module_type'] != 2:
-                base.base_json_ctrl({"T":105})
-                data = base.feedback_data()
-                if data is not None and data.get('T') == 1051:
-                    socketio.emit('arm_state_update', data, namespace='/arm_state_update')
-        else:
-            # SLAM mode: telemetry is read by the daemon and published to SHM
-            try:
-                with open('/dev/shm/ugv_esp_telemetry.json') as _f:
-                    shm_data = json.load(_f)
-                shm_data['T'] = 1001
-                base.base_data = shm_data
-                cvf.update_base_data(shm_data)
-            except Exception:
-                pass
+        cvf.update_base_data(base.feedback_data())
+        # arm state (только для module_type != 2, т.е. не PT)
+        if f['base_config']['module_type'] != 2:
+            base.base_json_ctrl({"T":105})
+            data = base.feedback_data()
+            if data is not None and data.get('T') == 1051:
+                socketio.emit('arm_state_update', data, namespace='/arm_state_update')
 
         # get sensor data
         if base.extra_sensor:

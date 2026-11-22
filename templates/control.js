@@ -646,11 +646,18 @@ socket.on('update', function(data) {
     console.log('AXCL DEBUG:', data[axcl_npu], data[axcl_mem], data[axcl_temp]);
     // Убрана проверка base_voltage — она блокировала OSD без ESP32
     try {
-        // update camera mode indicator (RES)
+        // update camera mode indicator (RES) + resolution button
         try {
             var resEl = document.getElementById("res_mode");
             if (resEl && typeof camera_mode !== 'undefined' && data[camera_mode] !== undefined) {
                 resEl.innerHTML = data[camera_mode];
+                // синхронизируем кнопку выбора режима с фактическим режимом
+                var btn = document.getElementById("video_pixel_btn");
+                if (btn) {
+                    var m = String(data[camera_mode]);  // e.g. "720p30", "1080p30"
+                    var label = m.replace(/p\d+$/, '').toUpperCase();  // -> "720" / "1080"
+                    btn.textContent = label + "P";
+                }
             }
         } catch (e) { /* ignore */ }
 

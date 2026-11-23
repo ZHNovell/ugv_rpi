@@ -18,8 +18,8 @@ import os
 import time
 
 WHEEL_BASE = 0.175   # малинка
-# 1 метр = 31.5 тика (откалибровано) -> 31.75 мм/тик
-MM_PER_TICK = 31.75
+# 1 тик = pi*WHEEL_D/ONE_CIRCLE_PLUSES = 0.1196 мм/тик (прошивка ESP32, рабочее 08:45)
+MM_PER_TICK = 0.1196
 SHM = '/dev/shm/esp_telemetry.json'
 
 # малинкины ковариации (base_node_ekf.cpp)

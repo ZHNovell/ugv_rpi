@@ -11,7 +11,7 @@ def generate_launch_description():
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_footprint_to_base_lidar_link',
-            arguments=['0', '0', '0', '0', '0', '0', 'base_footprint', 'base_lidar_link'],
+            arguments=['0.0398', '0', '0.12', '1.5708', '0', '0', 'base_footprint', 'base_lidar_link'],
         ),
         # LiDAR (D500 = LD19, порт ttyACM1)
         Node(

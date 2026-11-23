@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
 import os
 
 def generate_launch_description():
@@ -32,7 +31,7 @@ def generate_launch_description():
                 {'angle_crop_max': 315.0},
             ],
         ),
-        # IMU complementary filter (как малинка — сглаживает IMU перед EKF)
+        # IMU complementary filter (как малинка: /imu/data_raw -> /imu/data)
         Node(
             package='imu_complementary_filter',
             executable='complementary_filter_node',
@@ -46,7 +45,7 @@ def generate_launch_description():
                 {'gain_mag': 0.01},
             ],
         ),
-        # EKF (robot_localization) — сглаживает /odom_raw + /imu/data, публикует /odom + TF
+        # EKF (robot_localization): фьюзит /odom_raw + /imu/data -> /odom + TF
         Node(
             package='robot_localization',
             executable='ekf_node',

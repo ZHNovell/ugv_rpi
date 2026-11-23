@@ -1,27 +1,32 @@
 #!/usr/bin/env python3
-"""Raw wheel odometry + IMU node (feeds EKF, как у малинки).
+"""Wheel odometry + IMU node (1:1 порт малинки: ugv_bringup + base_node_ekf).
 
 Читает ESP32 telemetry (odl/odr/gz) из /dev/shm/esp_telemetry.json.
 Публикует:
-  - /odom_raw  (nav_msgs/Odometry): позиция+угол из колёс, скорости vx/vyaw.
-  - /imu/data  (sensor_msgs/Imu): yaw-скорость из gz.
-EKF (robot_localization) читает оба и публикует сглаженный /odom + TF.
+  - /odom_raw  (nav_msgs/Odometry): позиция+угол из колёс, малинкины ковариации.
+  - /imu/data_raw (sensor_msgs/Imu): аксел+гироскоп (малинкины формулы).
+imu_complementary_filter -> /imu/data, EKF фьюзит /odom_raw + /imu/data -> /odom + TF.
 """
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
-from geometry_msgs.msg import Quaternion, Vector3, Twist, Pose
+from geometry_msgs.msg import Quaternion
 import math
 import json
 import os
 import time
 
 WHEEL_BASE = 0.175   # малинка
-# откалибровано эмпирически 2026-11-22: 1 метр = 31.5 тика → 31.75 мм/тик
+# 1 метр = 31.5 тика (откалибровано) -> 31.75 мм/тик
 MM_PER_TICK = 31.75
-GYRO_DEG_PER_LSB = 0.06016
 SHM = '/dev/shm/esp_telemetry.json'
+
+# малинкины ковариации (base_node_ekf.cpp)
+ODOM_POSE_COV = [1e-3,0.0,0.0,0.0,0.0,0.0,  0.0,1e-3,0.0,0.0,0.0,0.0,  0.0,0.0,1e6,0.0,0.0,0.0,  0.0,0.0,0.0,1e6,0.0,0.0,  0.0,0.0,0.0,0.0,1e6,0.0,  0.0,0.0,0.0,0.0,0.0,1e3]
+ODOM_POSE_COV2 = [1e-9,0.0,0.0,0.0,0.0,0.0, 0.0,1e-3,0.0,0.0,0.0,0.0,  0.0,0.0,1e6,0.0,0.0,0.0,  0.0,0.0,0.0,1e6,0.0,0.0,  0.0,0.0,0.0,0.0,1e6,0.0,  0.0,0.0,0.0,0.0,0.0,1e-9]
+ODOM_TWIST_COV = [1e-3,0.0,0.0,0.0,0.0,0.0,  0.0,1e-3,0.0,0.0,0.0,0.0,  0.0,0.0,1e6,0.0,0.0,0.0,  0.0,0.0,0.0,1e6,0.0,0.0,  0.0,0.0,0.0,0.0,1e6,0.0,  0.0,0.0,0.0,0.0,0.0,1e3]
+ODOM_TWIST_COV2 = [1e-9,0.0,0.0,0.0,0.0,0.0, 0.0,1e-3,0.0,0.0,0.0,0.0,  0.0,0.0,1e6,0.0,0.0,0.0,  0.0,0.0,0.0,1e6,0.0,0.0,  0.0,0.0,0.0,0.0,1e6,0.0,  0.0,0.0,0.0,0.0,0.0,1e-9]
 
 
 def quat_from_yaw(yaw):
@@ -35,7 +40,7 @@ class RawOdomNode(Node):
     def __init__(self):
         super().__init__('raw_odom')
         self.odom_pub = self.create_publisher(Odometry, '/odom_raw', 10)
-        self.imu_pub = self.create_publisher(Imu, '/imu/data', 10)
+        self.imu_pub = self.create_publisher(Imu, '/imu/data_raw', 10)
 
         self.x = 0.0
         self.y = 0.0
@@ -64,7 +69,6 @@ class RawOdomNode(Node):
         now = time.time()
         odl = d.get('odl', 0) * MM_PER_TICK / 1000.0
         odr = d.get('odr', 0) * MM_PER_TICK / 1000.0
-        gz = float(d.get('gz', 0.0))
 
         dt = now - self.last_ts if self.last_ts is not None else 0.0
         self.last_ts = now
@@ -91,14 +95,13 @@ class RawOdomNode(Node):
             if abs(dleft) > 0.0001 or abs(dright) > 0.0001:
                 self._dbg_count += 1
                 if self._dbg_count % 20 == 1:
-                    self.get_logger().info(
-                        'x=%.3f y=%.3f yaw=%.3f vx=%.3f vyaw=%.3f'
-                        % (self.x, self.y, self.yaw, self.vx, self.vyaw))
+                    self.get_logger().info('x=%.3f y=%.3f yaw=%.3f vx=%.3f vyaw=%.3f'
+                                           % (self.x, self.y, self.yaw, self.vx, self.vyaw))
 
         self.prev_odl = odl
         self.prev_odr = odr
 
-        # publish raw odometry
+        # publish odometry (малинкины ковариации)
         odom = Odometry()
         odom.header.stamp = self.get_clock().now().to_msg()
         odom.header.frame_id = 'odom'
@@ -108,20 +111,24 @@ class RawOdomNode(Node):
         odom.pose.pose.orientation = quat_from_yaw(self.yaw)
         odom.twist.twist.linear.x = self.vx
         odom.twist.twist.angular.z = self.vyaw
+        if self.vx == 0 and self.vyaw == 0:
+            odom.pose.covariance = ODOM_POSE_COV2
+            odom.twist.covariance = ODOM_TWIST_COV2
+        else:
+            odom.pose.covariance = ODOM_POSE_COV
+            odom.twist.covariance = ODOM_TWIST_COV
         self.odom_pub.publish(odom)
 
-        # publish full IMU (accel + gyro), в единицах как малинка
+        # publish IMU (малинкины формулы)
         imu = Imu()
         imu.header.stamp = odom.header.stamp
         imu.header.frame_id = 'base_imu_link'
-        # accel: 9.8 * raw / 8192 (малинкина формула) → м/с²
         imu.linear_acceleration.x = 9.8 * float(d.get('ax', 0)) / 8192.0
         imu.linear_acceleration.y = 9.8 * float(d.get('ay', 0)) / 8192.0
         imu.linear_acceleration.z = 9.8 * float(d.get('az', 0)) / 8192.0
-        # gyro: pi * raw / (16.4*180) (малинкина формула) → рад/с
-        imu.angular_velocity.x = 3.14159265359 * float(d.get('gx', 0)) / (16.4 * 180.0)
-        imu.angular_velocity.y = 3.14159265359 * float(d.get('gy', 0)) / (16.4 * 180.0)
-        imu.angular_velocity.z = 3.14159265359 * float(d.get('gz', 0)) / (16.4 * 180.0)
+        imu.angular_velocity.x = 3.1415926 * float(d.get('gx', 0)) / (16.4 * 180.0)
+        imu.angular_velocity.y = 3.1415926 * float(d.get('gy', 0)) / (16.4 * 180.0)
+        imu.angular_velocity.z = 3.1415926 * float(d.get('gz', 0)) / (16.4 * 180.0)
         self.imu_pub.publish(imu)
 
 

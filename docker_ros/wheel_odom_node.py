@@ -67,8 +67,8 @@ class RawOdomNode(Node):
             return
 
         now = time.time()
-        odl = d.get('odl', 0) * MM_PER_TICK / 1000.0
-        odr = d.get('odr', 0) * MM_PER_TICK / 1000.0
+        odl = d.get('odl', 0) / 100.0  # cm -> meters (as malinka ugv_bringup)
+        odr = d.get('odr', 0) / 100.0  # cm -> meters (as malinka ugv_bringup)
 
         dt = now - self.last_ts if self.last_ts is not None else 0.0
         self.last_ts = now

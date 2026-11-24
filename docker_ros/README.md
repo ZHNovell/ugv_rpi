@@ -30,3 +30,13 @@ docker run --rm -v /root/ugv_ws:/ws ugv-ros-humble:malinka bash -lc \
 - rviz конфиг: `/ws/install/ugv_slam/share/ugv_slam/rviz/view_slam_2d.rviz` (Fixed Frame: map, Map + LaserScan + RobotModel).
 
 Запуск всего стека: `bash /root/start_cartographer.sh` (SLAM + rviz + rosbridge).
+
+## Просмотр карты в rviz на ПК (как у малинки, через MobaXterm)
+rviz крутится в контейнере, окно открывается на ПК через X11-форвардинг MobaXterm
+(на ПК ничего устанавливать не надо — MobaXterm уже содержит X-сервер).
+
+- Подключение: MobaXterm → `root@192.168.91.3:22` (X11-форвардинг включён по умолчанию).
+- Запуск всего: `bash /root/start_cartographer.sh`  → SLAM (headless-контейнер) + окно rviz на ПК.
+- Только rviz (SLAM уже запущен): `bash /root/start_rviz.sh`.
+- В контейнере rviz запускается с `LIBGL_ALWAYS_SOFTWARE=1` (рендер через llvmpipe).
+- VNC-десктоп (:1, порт 5901) остаётся как резервный способ.

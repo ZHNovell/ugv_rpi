@@ -11,7 +11,7 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory('ugv_slam'), 'launch', 'cartographer.launch.py')
         ),
-        launch_arguments={'use_rviz': 'true'}.items()
+        launch_arguments={'use_rviz': 'false'}.items()
     )
 
     # rosbridge + rosapi для Foxglove

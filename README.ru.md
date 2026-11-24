@@ -1438,8 +1438,8 @@ if (self.calib_w != frame_w) or (self.calib_h != frame_h):
 - [x] **MediaPipe Face** — заменить на NPU (по аналогии с pose).
 - [x] **Лидар D500** — драйвер напрямую в `cv_ctrl.py` (без ROS2).
 - [x] **Sensor Fusion** — лидар + depth в Python-воркере.
-- [ ] **SLAM** — Hector SLAM (лёгкий порт, без ROS2).
-- [ ] **Навигация** — VFH или Bug-алгоритм (без Nav2).
+- [x] **SLAM** — Cartographer (ROS2, стек малинки 1:1) + rviz на ПК через MobaXterm.
+- [ ] **Навигация** — ROS2 Nav2 (AMCL/emcl2 + TEB) + сохранение карты.
 - [x] **Лидарная защита** — стоп < 0.4 м.
 - [ ] **Автопилот** — визуальная одометрия.
 - [ ] **Камера глубины** — Orbbec Gemini 335 (когда проект поедет).

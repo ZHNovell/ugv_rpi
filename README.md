@@ -1437,8 +1437,8 @@ if (self.calib_w != frame_w) or (self.calib_h != frame_h):
 - [x] **MediaPipe Face** — replace with NPU (by analogy with pose).
 - [x] **D500 LiDAR** — driver directly in `cv_ctrl.py` (without ROS2).
 - [x] **Sensor Fusion** — LiDAR + depth in a Python worker.
-- [ ] **SLAM** — Hector SLAM (lightweight port, without ROS2).
-- [ ] **Navigation** — VFH or the Bug algorithm (without Nav2).
+- [x] **SLAM** — Cartographer (ROS2, malinka stack 1:1) + rviz on PC via MobaXterm.
+- [ ] **Navigation** — ROS2 Nav2 (AMCL/emcl2 + TEB) + map saving.
 - [x] **LiDAR protection** — stop < 0.4 m.
 - [ ] **Autopilot** — visual odometry.
 - [ ] **Depth camera** — Orbbec Gemini 335 (once the project gets going).

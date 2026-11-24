@@ -20,3 +20,13 @@ docker run --rm -v /root/ugv_ws:/ws ugv-ros-humble:malinka bash -lc \
    cartographer ldlidar rf2o_laser_odometry robot_pose_publisher ugv_base_node ugv_bringup ugv_description ugv_slam'
 ```
 Исходники пакетов: `/root/ugv_ws/src/{ugv_else,ugv_main}` (полная копия малинки).
+
+## Просмотр карты в rviz (как на малинке)
+Апельсинка headless, поэтому rviz крутится в контейнере и рисует на VNC-дисплей :1.
+
+- VNC-десктоп (Xvnc + XFCE) на порту **5901**, автозапуск через `systemd` (`vnc.service`).
+- Контейнер запускается с `-v /tmp/.X11-unix:/tmp/.X11-unix -e DISPLAY=:1` и `use_rviz:=true`.
+- Подключение: VNC-клиент → `192.168.91.3:5901` (без пароля, доверенная локальная сеть).
+- rviz конфиг: `/ws/install/ugv_slam/share/ugv_slam/rviz/view_slam_2d.rviz` (Fixed Frame: map, Map + LaserScan + RobotModel).
+
+Запуск всего стека: `bash /root/start_cartographer.sh` (SLAM + rviz + rosbridge).

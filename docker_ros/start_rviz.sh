@@ -15,4 +15,4 @@ exec docker run --rm --network host \
   -v /dev/shm:/dev/shm \
   -v /root/ugv_ws:/ws \
   ugv-ros-humble:malinka \
-  bash -c 'source /opt/ros/humble/setup.bash; source /ws/install/setup.bash; exec rviz2 -d /ws/install/ugv_slam/share/ugv_slam/rviz/view_slam_2d.rviz'
+  bash -c 'source /opt/ros/humble/setup.bash; source /ws/install/setup.bash; cp /ws/install/ugv_slam/share/ugv_slam/rviz/view_slam_2d.rviz /tmp/rviz_slam.rviz; exec rviz2 -d /tmp/rviz_slam.rviz'

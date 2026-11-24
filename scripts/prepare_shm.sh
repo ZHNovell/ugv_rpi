@@ -9,3 +9,13 @@ if [ ! -f "$MODEL_DST" ] || [ "$MODEL_SRC" -nt "$MODEL_DST" ]; then
 else
     echo "✅ Model already in /dev/shm"
 fi
+
+# Копирует asound.conf (маршрут звука на USB-спикер card 3) в системный /etc
+ASOUND_SRC="/root/ugv_rpi/asound.conf"
+ASOUND_DST="/etc/asound.conf"
+if [ ! -f "$ASOUND_DST" ] || ! cmp -s "$ASOUND_SRC" "$ASOUND_DST"; then
+    cp "$ASOUND_SRC" "$ASOUND_DST"
+    echo "asound.conf installed to /etc/asound.conf"
+else
+    echo "asound.conf already up to date"
+fi

@@ -19,3 +19,6 @@ if [ ! -f "$ASOUND_DST" ] || ! cmp -s "$ASOUND_SRC" "$ASOUND_DST"; then
 else
     echo "asound.conf already up to date"
 fi
+
+# Громкость USB-спикера на максимум
+amixer -c 3 sset Speaker 100% >/dev/null 2>&1 || true

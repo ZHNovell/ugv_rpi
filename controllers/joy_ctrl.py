@@ -342,8 +342,8 @@ class JoyTeleop:
         self.prev_led_next_gear_pressed = False
         self.prev_led_down_gear_pressed = False
 
-        self.speed_gear = 0.3
-        self.speed_level = [0.3,0.66,1.0]
+        self.speed_gear = 0.15
+        self.speed_level = [0.15,0.66,1.0]
         self.led_gear = 0.0
         self.led_level = [round(i / 25.0, 3) for i in range(0, 26)]
 
@@ -502,7 +502,7 @@ class JoyTeleop:
 
             x = hats[0][1] * self.xspeed_limit * self.speed_gear
             # y = axis[self.mapping["LEFT_STICK_X"]] * self.yspeed_limit * self.speed_gear
-            angular = -hats[0][0] * 3.0  # фиксированный Z = ±3.0 для UGV Rover
+            angular = -hats[0][0] * 3.0 * self.speed_gear  # Z масштабируется передачей (slow: разворот ~3x медленнее)
 
             self.send_cmd_vel(
                 max(-self.xspeed_limit, min(self.xspeed_limit, x)),

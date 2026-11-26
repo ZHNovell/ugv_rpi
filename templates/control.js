@@ -1072,33 +1072,36 @@ function moveProcess() {
     }
 
     // Movtion Ctrl
+    var linear_speed = max_speed / 2;  // прямой ход 2x медленнее
+    var turn_speed   = max_speed / 3;  // разворот на месте 3x медленнее
+    var arc_slow     = slow_speed / 2; // внутреннее колесо при дуге
     if (forwardButton == 0 && backwardButton == 0 && leftButton == 0 && rightButton == 0) {
         heartbeat_left  =  0;
         heartbeat_right =  0;
     }else if (forwardButton == 1 && backwardButton == 0 && leftButton == 0 && rightButton == 0){
-        heartbeat_left  =  max_speed;
-        heartbeat_right =  max_speed;
+        heartbeat_left  =  linear_speed;
+        heartbeat_right =  linear_speed;
     }else if (forwardButton == 0 && backwardButton == 1 && leftButton == 0 && rightButton == 0){
-        heartbeat_left  = -max_speed;
-        heartbeat_right = -max_speed;
+        heartbeat_left  = -linear_speed;
+        heartbeat_right = -linear_speed;
     }else if (forwardButton == 0 && backwardButton == 0 && leftButton == 1 && rightButton == 0){
-        heartbeat_left  = -max_speed;
-        heartbeat_right =  max_speed;
+        heartbeat_left  = -turn_speed;
+        heartbeat_right =  turn_speed;
     }else if (forwardButton == 0 && backwardButton == 0 && leftButton == 0 && rightButton == 1){
-        heartbeat_left  =  max_speed;
-        heartbeat_right = -max_speed;
+        heartbeat_left  =  turn_speed;
+        heartbeat_right = -turn_speed;
     }else if (forwardButton == 1 && backwardButton == 0 && leftButton == 1 && rightButton == 0){
-        heartbeat_left  =  slow_speed;
-        heartbeat_right =  max_speed;
+        heartbeat_left  =  arc_slow;
+        heartbeat_right =  linear_speed;
     }else if (forwardButton == 1 && backwardButton == 0 && leftButton == 0 && rightButton == 1){
-        heartbeat_left  =  max_speed;
-        heartbeat_right =  slow_speed;
+        heartbeat_left  =  linear_speed;
+        heartbeat_right =  arc_slow;
     }else if (forwardButton == 0 && backwardButton == 1 && leftButton == 1 && rightButton == 0){
-        heartbeat_left  = -slow_speed;
-        heartbeat_right = -max_speed;
+        heartbeat_left  = -arc_slow;
+        heartbeat_right = -linear_speed;
     }else if (forwardButton == 0 && backwardButton == 1 && leftButton == 0 && rightButton == 1){
-        heartbeat_left  = -max_speed;
-        heartbeat_right = -slow_speed;
+        heartbeat_left  = -linear_speed;
+        heartbeat_right = -arc_slow;
     }
 
     cmdJsonCmd({'T':cmd_movition_ctrl,'L':heartbeat_left,'R':heartbeat_right});

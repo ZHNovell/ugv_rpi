@@ -4,6 +4,8 @@
 set -e
 NAME="ugv_nav"
 docker stop ugv_slam 2>/dev/null || true
+docker stop ugv_explore 2>/dev/null || true
+docker rm -f ugv_explore 2>/dev/null || true
 docker rm -f "$NAME" 2>/dev/null || true
 docker run -d --name "$NAME" \
   --device /dev/ttyACM1:/dev/ttyACM1 \

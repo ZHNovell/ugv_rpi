@@ -2,6 +2,13 @@
 # Запуск SLAM (малинка-стек) + rviz на ПК через X11 (MobaXterm).
 NAME="ugv_slam"
 
+# SLAM и навигация не могут работать одновременно: оба читают лидар /dev/ttyACM1.
+# Останавливаем навигацию/автоисследование, иначе карта размазывается.
+docker stop ugv_nav 2>/dev/null || true
+docker rm -f ugv_nav 2>/dev/null || true
+docker stop ugv_explore 2>/dev/null || true
+docker rm -f ugv_explore 2>/dev/null || true
+
 # 1. SLAM-контейнер (headless, без rviz внутри)
 if ! docker ps --format '{{.Names}}' | grep -q "^${NAME}$"; then
   docker rm -f "$NAME" 2>/dev/null || true

@@ -352,6 +352,8 @@ class JoyTeleop:
         self.angular_speed_limit = f['args_config']['max_turn_speed']
         self.zero_vel_count = 0
         self.zero_vel_limit = 5
+        self.cur_L = 0.0
+        self.cur_R = 0.0
 
         self.led_limit = 255.0
         self.last_led_sent_data = None
@@ -407,6 +409,10 @@ class JoyTeleop:
             print(f"MODE: {self.mode}")
 
     def send_cmd_vel(self, linear_x, linear_y, angular_z):
+        # current wheel speeds L/R (converted from cmd_vel, same as ESP32 rosCtrl),
+        # used to bridge the physical joystick into the web heartbeat
+        self.cur_L = linear_x - angular_z * 0.0625
+        self.cur_R = linear_x + angular_z * 0.0625
         if linear_x == 0.0 and angular_z == 0.0:
             self.zero_vel_count += 1
             if self.zero_vel_count > self.zero_vel_limit:

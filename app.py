@@ -719,9 +719,19 @@ class JoyCtrlThread(threading.Thread):
         self.running = True
 
     def run(self):
+        last_emit = None
         while self.running:
             if self.js_reader.Joy_active:
                 self.joy_ctrl.handle_events()
+                # bridge joystick L/R to the browser so the web heartbeat
+                # re-asserts the current velocity instead of the idle stop (T:1 L:0 R:0)
+                lr = (round(self.joy_ctrl.cur_L, 3), round(self.joy_ctrl.cur_R, 3))
+                if lr != last_emit:
+                    last_emit = lr
+                    try:
+                        socketio.emit('joy_vel', {'L': lr[0], 'R': lr[1]}, namespace='/ctrl')
+                    except Exception:
+                        pass
             time.sleep(0.05)
 
     def stop(self):

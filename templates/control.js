@@ -851,6 +851,12 @@ socket.on('update', function(data) {
 
 var heartbeat_left  = 0;
 var heartbeat_right = 0;
+// physical joystick (pygame) bridge: keep the web heartbeat re-asserting the
+// joystick's current wheel speeds instead of fighting it with a stop command
+socket.on('joy_vel', function(data) {
+    heartbeat_left = data.L;
+    heartbeat_right = data.R;
+});
 var speed_rate = 0.3;
 var defaultSpeed = speed_rate;
 let lastTimeCmdSend = Date.now();;

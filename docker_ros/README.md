@@ -21,6 +21,8 @@
 | Логи навигации | `docker logs -f ugv_nav` |
 | Остановить SLAM | `docker stop ugv_slam` |
 | Остановить навигацию | `docker stop ugv_nav` |
+| Авто-исследование (explore_lite) | `bash /root/start_explore.sh` |
+| Остановить авто-исследование | `docker stop ugv_explore` |
 
 ---
 
@@ -73,6 +75,24 @@ rviz крутится в контейнере, окно открывается �
 - Подключение: MobaXterm → `root@192.168.91.3:22` (X11-форвардинг включён по умолчанию).
 - Запускать `start_*rviz*` из MobaXterm (иначе нет `DISPLAY`).
 - Флаги: `LIBGL_ALWAYS_SOFTWARE=1` (llvmpipe), контейнер монтирует `/dev/shm` (DDS shared memory).
+
+## Режим 5 — Авто-исследование (explore_lite)
+
+Робот сам объезжает помещение и исследует карту (как на малинке, раздел «Автоматическое
+исследование»). Нужна запущенная навигация + сохранённая карта.
+
+```bash
+bash /root/start_nav.sh          # 1) навигация (если ещё не запущена)
+bash /root/start_rviz_nav.sh     # 2) rviz на ПК — следить за картой
+bash /root/start_explore.sh      # 3) авто-исследование в отдельном контейнере
+```
+
+Что происходит: `explore_lite` шлёт цели `navigate_to_pose` в nav2, nav2 строит путь и
+публикует `/cmd_vel`, мост `/cmd_vel → ESP32` двигает робота. Важно: `use_sim_time:=false`
+(реальный робот, а не Gazebo).
+
+Остановить: `docker stop ugv_explore`. Логи: `docker logs -f ugv_explore`.
+Примечание (как на малинке): авто-исследование — для небольшого закрытого помещения.
 
 ---
 

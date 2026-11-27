@@ -10,3 +10,9 @@ cd "$MAPDIR"
 ros2 run nav2_map_server map_saver_cli -f ./map
 ros2 service call /write_state cartographer_ros_msgs/srv/WriteState "{filename: '$MAPDIR/map.pbstream'}"
 echo "Карта сохранена в $MAPDIR (map.pgm, map.yaml, map.pbstream)"
+
+# Скопировать свежую карту в install — оттуда nav.launch.py её загружает (иначе навигация видит старую карту)
+INSTALLDIR="/ws/install/ugv_nav/share/ugv_nav/maps"
+mkdir -p "$INSTALLDIR"
+cp "$MAPDIR/map.pgm" "$MAPDIR/map.yaml" "$MAPDIR/map.pbstream" "$INSTALLDIR/"
+echo "Карта скопирована в $INSTALLDIR (для навигации)"

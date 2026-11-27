@@ -1074,7 +1074,7 @@ function moveProcess() {
     // Movtion Ctrl
     var linear_speed = max_speed / 2;  // прямой ход 2x медленнее
     var turn_speed   = max_speed / 3;  // разворот на месте 3x медленнее
-    var arc_slow     = slow_speed / 2; // внутреннее колесо при дуге
+    var arc_slow     = slow_speed / 2; // внутреннее колесо при дуге (скорость ниже, радиус тот же)
     if (forwardButton == 0 && backwardButton == 0 && leftButton == 0 && rightButton == 0) {
         heartbeat_left  =  0;
         heartbeat_right =  0;

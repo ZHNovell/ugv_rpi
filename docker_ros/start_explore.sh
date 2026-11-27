@@ -7,8 +7,8 @@ set -e
 NAME="ugv_explore"
 RVIZ="ugv_rviz_nav"
 
-if ! docker ps --format '{{.Names}}' | grep -q '^ugv_nav$'; then
-  echo "Навигация не запущена. Сначала: bash /root/start_nav.sh"
+if ! docker ps --format '{{.Names}}' | grep -qE '^(ugv_nav|ugv_slam_nav)$'; then
+  echo "Навигация не запущена. Сначала: bash /root/start_nav.sh (по карте) или bash /root/start_slam_nav.sh (SLAM+навигация, карта строится на лету)"
   exit 1
 fi
 

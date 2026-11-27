@@ -5,7 +5,8 @@ if [ -z "$DISPLAY" ]; then
   echo "Нет DISPLAY. Запусти из MobaXterm (X11-форвардинг)."
   exit 1
 fi
-exec docker run --rm --network host \
+docker rm -f ugv_rviz_nav 2>/dev/null || true
+docker run -d --rm --name ugv_rviz_nav --network host \
   -e DISPLAY="$DISPLAY" \
   -e XAUTHORITY=/root/.Xauthority \
   -e LIBGL_ALWAYS_SOFTWARE=1 \

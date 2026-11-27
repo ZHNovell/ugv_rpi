@@ -32,7 +32,8 @@ fi
 
 echo "Жду запуска SLAM..."; sleep 6
 echo "Открываю rviz (DISPLAY=$DISPLAY)..."
-exec docker run --rm --network host \
+docker rm -f ugv_rviz_slam 2>/dev/null || true
+docker run -d --rm --name ugv_rviz_slam --network host \
   -e DISPLAY="$DISPLAY" \
   -e XAUTHORITY=/root/.Xauthority \
   -e LIBGL_ALWAYS_SOFTWARE=1 \

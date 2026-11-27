@@ -1,13 +1,17 @@
 import json
+import os
+import time
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Header, Float32MultiArray, Float32
 from sensor_msgs.msg import Imu, MagneticField
+from geometry_msgs.msg import Twist
 
 # Адаптация для Orange Pi: телеметрия ESP32 читается из /dev/shm/esp_telemetry.json,
 # который пишет хост-приложение app.py (владелец последовательного порта /dev/ttyACM0).
 # Всё остальное (темы, frame_id, преобразования) - 1:1 как у малинки ugv_bringup.py.
 SHM_PATH = "/dev/shm/esp_telemetry.json"
+CMD_VEL_SHM_PATH = "/dev/shm/cmd_vel.json"
 
 
 class ShmTelemetry:
@@ -41,9 +45,22 @@ class ugv_bringup(Node):
         self.imu_mag_publisher_ = self.create_publisher(MagneticField, "imu/mag", 100)
         self.odom_publisher_ = self.create_publisher(Float32MultiArray, "odom/odom_raw", 100)
         self.voltage_publisher_ = self.create_publisher(Float32, "voltage", 50)
+        # Bridge nav2 /cmd_vel to the host app via /dev/shm (host owns the serial)
+        self.cmd_vel_sub_ = self.create_subscription(Twist, "cmd_vel", self.cmd_vel_cb, 10)
         # Telemetry source: shared file (instead of serial)
         self.telemetry = ShmTelemetry()
         self.feedback_timer = self.create_timer(0.02, self.feedback_loop)
+
+    # Bridge: write nav2 /cmd_vel to /dev/shm/cmd_vel.json for the host app
+    def cmd_vel_cb(self, msg):
+        data = {"X": float(msg.linear.x), "Z": float(msg.angular.z), "ts": time.time()}
+        try:
+            tmp = CMD_VEL_SHM_PATH + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(data, f)
+            os.rename(tmp, CMD_VEL_SHM_PATH)
+        except OSError:
+            pass
 
     # Main loop for reading sensor feedback and publishing it to ROS topics
     def feedback_loop(self):

@@ -572,10 +572,47 @@ def serve_static_settings(filename):
 
 
 
+# --- /cmd_vel -> ESP32 bridge (autonomous navigation via nav2) ---
+last_manual_time = 0.0
+
+
+def cmd_vel_bridge_loop():
+    # Reads nav2 /cmd_vel from /dev/shm/cmd_vel.json (written by ugv_bringup in
+    # the ROS container) and forwards it to the ESP32 as T:13 X/Z. Only acts while
+    # the file is fresh (nav2 is publishing) and the user is not driving manually.
+    last_sent = None
+    while True:
+        try:
+            with open("/dev/shm/cmd_vel.json", "r") as f:
+                data = json.load(f)
+            fresh = (time.time() - float(data.get("ts", 0))) < 1.0
+            manual = (time.time() - last_manual_time) < 1.0
+            if fresh and not manual:
+                x = round(float(data.get("X", 0.0)), 3)
+                z = round(float(data.get("Z", 0.0)), 3)
+                cur = (x, z)
+                if cur != last_sent:
+                    last_sent = cur
+                    base.base_json_ctrl({"T": 13, "X": x, "Z": z})
+            else:
+                last_sent = None
+        except Exception:
+            pass
+        time.sleep(0.05)
+
+
 # Web socket
 @socketio.on('json', namespace='/json')
 def handle_socket_json(json):
+    global last_manual_time
     try:
+        # manual override: non-zero keyboard/web movement pauses the cmd_vel bridge
+        try:
+            if json.get('T') == f['cmd_config']['cmd_movition_ctrl']:
+                if float(json.get('L', 0)) != 0.0 or float(json.get('R', 0)) != 0.0:
+                    last_manual_time = time.time()
+        except Exception:
+            pass
         base.base_json_ctrl(json)
     except Exception as e:
         print("Error handling JSON data:", e)
@@ -719,10 +756,14 @@ class JoyCtrlThread(threading.Thread):
         self.running = True
 
     def run(self):
+        global last_manual_time
         last_emit = None
         while self.running:
             if self.js_reader.Joy_active:
                 self.joy_ctrl.handle_events()
+                # manual override: non-zero joystick velocity pauses the cmd_vel bridge
+                if self.joy_ctrl.cur_L != 0.0 or self.joy_ctrl.cur_R != 0.0:
+                    last_manual_time = time.time()
                 # bridge joystick L/R to the browser so the web heartbeat
                 # re-asserts the current velocity instead of the idle stop (T:1 L:0 R:0)
                 lr = (round(self.joy_ctrl.cur_L, 3), round(self.joy_ctrl.cur_R, 3))
@@ -762,6 +803,10 @@ if __name__ == "__main__":
     # base data update
     base_update_thread = threading.Thread(target=base_data_loop, daemon=True)
     base_update_thread.start()
+
+    # cmd_vel bridge (autonomous navigation)
+    cmd_vel_thread = threading.Thread(target=cmd_vel_bridge_loop, daemon=True)
+    cmd_vel_thread.start()
 
     # lights off
     base.lights_ctrl(0, 0)

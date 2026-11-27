@@ -83,15 +83,17 @@ rviz крутится в контейнере, окно открывается �
 
 ```bash
 bash /root/start_nav.sh          # 1) навигация (если ещё не запущена)
-bash /root/start_rviz_nav.sh     # 2) rviz на ПК — следить за картой
-bash /root/start_explore.sh      # 3) авто-исследование в отдельном контейнере
+bash /root/start_explore.sh      # 2) rviz на ПК + авто-исследование (одним скриптом)
 ```
+
+`start_explore.sh` сам запускает rviz (в фоне, терминал не блокирует) и `explore_lite`
+в отдельном контейнере. Если `DISPLAY` не задан (не из MobaXterm) — rviz пропускается.
 
 Что происходит: `explore_lite` шлёт цели `navigate_to_pose` в nav2, nav2 строит путь и
 публикует `/cmd_vel`, мост `/cmd_vel → ESP32` двигает робота. Важно: `use_sim_time:=false`
 (реальный робот, а не Gazebo).
 
-Остановить: `docker stop ugv_explore`. Логи: `docker logs -f ugv_explore`.
+Остановить: `docker stop ugv_explore ugv_rviz_nav`. Логи: `docker logs -f ugv_explore`.
 Примечание (как на малинке): авто-исследование — для небольшого закрытого помещения.
 
 ---
